@@ -3,6 +3,10 @@
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/syscalls.h>
+
+#include <linux/file.h>
+#include <linux/fsnotify.h>
+
 #include <asm/uaccess.h>
 
 #define MY_MACIG 'G'
@@ -12,6 +16,15 @@
 
 asmlinkage ssize_t (*call_sendfile)(int out_fd, int in_fd,
                               off_t __user *offset, size_t count);
+
+//extern int rw_verify_area(int read_write, struct file *file, const loff_t *ppos, size_t count);
+
+// HACK
+int rw_verify_area(int read_write, struct file *file, const loff_t *ppos, size_t count)
+{
+        return count;
+}
+
 
  
 static int major; 
@@ -27,7 +40,7 @@ struct t_data {
 struct t_message {
 	int out_fd;
 	int in_fd;
-	off_t *offset;
+	loff_t *offset;
 	size_t count;	
 };
 
@@ -45,6 +58,107 @@ static ssize_t device_read(struct file *file, char __user *buffer, size_t len, l
 	printk(DEVICE_NAME " read(%d)\n", key_data->message);
 	return simple_read_from_buffer(buffer, len, offset,
 		&key_data->message, sizeof(key_data->message));
+}
+
+
+static ssize_t do_sendfile(int out_fd, int in_fd, loff_t *ppos,
+		  	   size_t count, loff_t max)
+{
+	struct fd in, out;
+	struct inode *in_inode, *out_inode;
+	loff_t pos;
+	loff_t out_pos;
+	ssize_t retval;
+	int fl;
+
+	/*
+	 * Get input file, and verify that it is ok..
+	 */
+	retval = -EBADF;
+	in = fdget(in_fd);
+	if (!in.file)
+		goto out;
+	if (!(in.file->f_mode & FMODE_READ))
+		goto fput_in;
+	retval = -ESPIPE;
+	if (!ppos) {
+		pos = in.file->f_pos;
+	} else {
+		pos = *ppos;
+		if (!(in.file->f_mode & FMODE_PREAD))
+			goto fput_in;
+	}
+	retval = rw_verify_area(READ, in.file, &pos, count);
+	if (retval < 0)
+		goto fput_in;
+	count = retval;
+
+	/*
+	 * Get output file, and verify that it is ok..
+	 */
+	retval = -EBADF;
+	out = fdget(out_fd);
+	if (!out.file)
+		goto fput_in;
+	if (!(out.file->f_mode & FMODE_WRITE))
+		goto fput_out;
+	retval = -EINVAL;
+	in_inode = file_inode(in.file);
+	out_inode = file_inode(out.file);
+	out_pos = out.file->f_pos;
+	retval = rw_verify_area(WRITE, out.file, &out_pos, count);
+	if (retval < 0)
+		goto fput_out;
+	count = retval;
+
+	if (!max)
+		max = min(in_inode->i_sb->s_maxbytes, out_inode->i_sb->s_maxbytes);
+
+	if (unlikely(pos + count > max)) {
+		retval = -EOVERFLOW;
+		if (pos >= max)
+			goto fput_out;
+		count = max - pos;
+	}
+
+	fl = 0;
+#if 0
+	/*
+	 * We need to debate whether we can enable this or not. The
+	 * man page documents EAGAIN return for the output at least,
+	 * and the application is arguably buggy if it doesn't expect
+	 * EAGAIN on a non-blocking file descriptor.
+	 */
+	if (in.file->f_flags & O_NONBLOCK)
+		fl = SPLICE_F_NONBLOCK;
+#endif
+	file_start_write(out.file);
+	retval = do_splice_direct(in.file, &pos, out.file, &out_pos, count, fl);
+	file_end_write(out.file);
+
+	if (retval > 0) {
+		add_rchar(current, retval);
+		add_wchar(current, retval);
+		fsnotify_access(in.file);
+		fsnotify_modify(out.file);
+		out.file->f_pos = out_pos;
+		if (ppos)
+			*ppos = pos;
+		else
+			in.file->f_pos = pos;
+	}
+
+	inc_syscr(current);
+	inc_syscw(current);
+	if (pos > max)
+		retval = -EOVERFLOW;
+
+fput_out:
+	fdput(out);
+fput_in:
+	fdput(in);
+out:
+	return retval;
 }
 
 static ssize_t device_write(struct file *file, const char __user *buff, size_t len, loff_t *off)
@@ -102,21 +216,14 @@ static ssize_t device_write(struct file *file, const char __user *buff, size_t l
 			return -1;
 		}
 
-		printk(DEVICE_NAME " message received (*offset=%ld)\n", 
+		printk(DEVICE_NAME " message received (*offset=%lld)\n", 
 			*message.offset);
 
 		// Dang, sys_sendfile is not exported. Not a big deal later, but it would have been nice to test with...
-		//sys_sendfile(message.out_fd, message.in_fd,
-		//	message.offset, message.count);
-//		sys_call_table[__NR_sendfile](message.out_fd, message.in_fd,
-//                            message.offset, message.count);
-//		{
-//			call_sendfile = sys_call_table[__NR_sendfile];
-//			call_sendfile(message.out_fd, message.in_fd,
-//                           message.offset, message.count);
-//		}
-
 		key_data->message = message.count - *message.offset;
+		do_sendfile(message.out_fd, message.in_fd,
+			message.offset, message.count, MAX_NON_LFS);
+		printk(DEVICE_NAME " message: %d\n", key_data->message);
 		return key_data->message;
 	}
 }

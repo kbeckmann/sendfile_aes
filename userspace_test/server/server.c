@@ -49,7 +49,7 @@ int main(int argc, char **argv)
   int fd;                    /* file descriptor for file to send */
   struct sockaddr_in addr;   /* socket parameters for bind */
   struct sockaddr_in addr1;  /* socket parameters for accept */
-  int    addrlen;            /* argument to accept */
+  socklen_t addrlen;         /* argument to accept */
   struct stat stat_buf;      /* argument to fstat */
   off_t offset = 0;          /* file offset */
   char filename[PATH_MAX];   /* filename to send */
@@ -134,6 +134,8 @@ int main(int argc, char **argv)
     fprintf(stderr, "received request to send file %s\n", filename);
 
     /* open the file to be sent */
+    fprintf(stdout, "opening file %s\n", filename);
+    fflush(stdout);
     fd = open(filename, O_RDONLY);
     if (fd == -1) {
       fprintf(stderr, "unable to open '%s': %s\n", filename, strerror(errno));
@@ -148,7 +150,11 @@ int main(int argc, char **argv)
     /*
     rc = sendfile (desc, fd, &offset, stat_buf.st_size);
     */
+    fprintf(stdout, "sendfile()\n");
+    fflush(stdout);
     rc = sendfile_aes_send(sendfile_aes_handle, desc, fd, &offset, stat_buf.st_size);
+    fprintf(stdout, "sendfile() done\n");
+    fflush(stdout);
 
     if (rc == -1) {
       fprintf(stderr, "error from sendfile: %s\n", strerror(errno));
@@ -160,6 +166,9 @@ int main(int argc, char **argv)
               (int)stat_buf.st_size);
       exit(1);
     }
+
+    fprintf(stdout, "closing file\n");
+    fflush(stdout);
 
     /* close descriptor for file that was sent */
     close(fd);

@@ -32,14 +32,24 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/limits.h>
 #include <sys/sendfile.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <netinet/in.h>
-#include <linux/limits.h>
 
 #include "sendfile_aes_client.h"
+
+long time_us()
+{
+	long ret;
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	ret = 1000000L * tv.tv_sec + tv.tv_usec;
+	return ret;
+}
 
 int main(int argc, char **argv)
 {
@@ -55,6 +65,7 @@ int main(int argc, char **argv)
   char filename[PATH_MAX];   /* filename to send */
   int rc;                    /* holds return code of system calls */
   int sendfile_aes_handle;   /* holds the handle to our fancy sendfile_aes */
+  long t0;
 
   /* check command line arguments, handling an optional port number */
   if (argc == 2) {
@@ -111,6 +122,8 @@ int main(int argc, char **argv)
       exit(1);
     }
 
+    t0 = time_us();
+
     /* get the file name from the client */
     rc = recv(desc, filename, sizeof(filename), 0);
     if (rc == -1) {
@@ -134,8 +147,6 @@ int main(int argc, char **argv)
     fprintf(stderr, "received request to send file %s\n", filename);
 
     /* open the file to be sent */
-    fprintf(stdout, "opening file %s\n", filename);
-    fflush(stdout);
     fd = open(filename, O_RDONLY);
     if (fd == -1) {
       fprintf(stderr, "unable to open '%s': %s\n", filename, strerror(errno));
@@ -150,11 +161,7 @@ int main(int argc, char **argv)
     /*
     rc = sendfile (desc, fd, &offset, stat_buf.st_size);
     */
-    fprintf(stdout, "sendfile()\n");
-    fflush(stdout);
     rc = sendfile_aes_send(sendfile_aes_handle, desc, fd, &offset, stat_buf.st_size);
-    fprintf(stdout, "sendfile() done\n");
-    fflush(stdout);
 
     if (rc == -1) {
       fprintf(stderr, "error from sendfile: %s\n", strerror(errno));
@@ -167,14 +174,14 @@ int main(int argc, char **argv)
       exit(1);
     }
 
-    fprintf(stdout, "closing file\n");
-    fflush(stdout);
-
     /* close descriptor for file that was sent */
     close(fd);
 
     /* close socket descriptor */
     close(desc);
+    
+    fprintf(stdout, "took: %ldus\n", (time_us() - t0));
+    fflush(stdout);
   }
 
   /* close socket */

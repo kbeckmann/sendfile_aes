@@ -65,19 +65,7 @@ int sendfile_aes_send(int fd, int out_fd, int in_fd, off_t *offset, size_t count
 		return -1;
 	}
 
-	printf("ret: %d\n", ret);
 	return ret;
-/*
-	ret = read(fd, buf, sizeof(buf));
-	if (ret < 0) {
-		perror ("read error");
-	}
-		
-	//ret = *((int*)buf);
-	printf("ret: %d\n", ret);
-
-	return ret;
-*/
 }
 
 int sendfile_aes_close(int fd)

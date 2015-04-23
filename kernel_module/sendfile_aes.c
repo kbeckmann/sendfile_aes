@@ -24,8 +24,6 @@ int rw_verify_area(int read_write, struct file *file, const loff_t *ppos, size_t
 {
         return count;
 }
-
-
  
 static int major; 
 static int message_err = -1;
@@ -43,6 +41,24 @@ struct t_message {
 	loff_t *offset;
 	size_t count;	
 };
+
+int file_write(struct file* file, 
+unsigned char* data, 
+size_t size,
+loff_t *offset
+) {
+	mm_segment_t oldfs;
+	int ret;
+
+	oldfs = get_fs();
+	set_fs(get_ds());
+
+	ret = vfs_write(file, data, size, offset);
+
+	set_fs(oldfs);
+	return ret;
+}
+
 
 static ssize_t device_read(struct file *file, char __user *buffer, size_t len, loff_t *offset)
 {
@@ -221,8 +237,32 @@ static ssize_t device_write(struct file *file, const char __user *buff, size_t l
 
 		// Dang, sys_sendfile is not exported. Not a big deal later, but it would have been nice to test with...
 		key_data->message = message.count - *message.offset;
-		do_sendfile(message.out_fd, message.in_fd,
+		if (1 == 2) do_sendfile(message.out_fd, message.in_fd,
 			message.offset, message.count, MAX_NON_LFS);
+		{
+			char tmp_buf[100];
+			ssize_t n;
+			// ssize_t n2;
+			struct file *file_in = fget(message.in_fd);
+			struct file *file_out = fget(message.out_fd);
+			while ((n = file_in->f_op->read(file_in, tmp_buf, sizeof(tmp_buf) - 1, &file_in->f_pos)) > 0)
+			{
+				loff_t offset = 0;
+
+				// "encrypt"
+				ssize_t i;
+				for (i = 0; i < n; i++)
+				{
+					// mostly harmless scrambling
+					if (tmp_buf[i] == 'A') tmp_buf[i] = 'B';
+				}
+				tmp_buf[n - 1] = '\0';
+				printk(DEVICE_NAME " buf[%s]\n", tmp_buf);
+
+				// write to out_fd
+				file_write(file_out, tmp_buf, n, &offset);
+			}
+		}
 		printk(DEVICE_NAME " message: %d\n", key_data->message);
 		return key_data->message;
 	}

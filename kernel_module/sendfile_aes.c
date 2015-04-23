@@ -9,22 +9,8 @@
 
 #include <asm/uaccess.h>
 
-#define MY_MACIG 'G'
-#define READ_IOCTL _IOR(MY_MACIG, 0, int)
-#define WRITE_IOCTL _IOW(MY_MACIG, 1, int)
 #define DEVICE_NAME "sendfile_aes"
 
-asmlinkage ssize_t (*call_sendfile)(int out_fd, int in_fd,
-                              off_t __user *offset, size_t count);
-
-//extern int rw_verify_area(int read_write, struct file *file, const loff_t *ppos, size_t count);
-
-// HACK
-int rw_verify_area(int read_write, struct file *file, const loff_t *ppos, size_t count)
-{
-        return count;
-}
- 
 static int major; 
 static int message_err = -1;
 static int num_open_files = 0;
@@ -42,11 +28,8 @@ struct t_message {
 	size_t count;	
 };
 
-int file_write(struct file* file, 
-unsigned char* data, 
-size_t size,
-loff_t *offset
-) {
+static int file_write(struct file* file, unsigned char* data, size_t size, loff_t *offset)
+{
 	mm_segment_t oldfs;
 	int ret;
 
@@ -104,7 +87,8 @@ static ssize_t do_sendfile(int out_fd, int in_fd, loff_t *ppos,
 		if (!(in.file->f_mode & FMODE_PREAD))
 			goto fput_in;
 	}
-	retval = rw_verify_area(READ, in.file, &pos, count);
+	//retval = rw_verify_area(READ, in.file, &pos, count);
+	retval = count;
 	if (retval < 0)
 		goto fput_in;
 	count = retval;
@@ -122,7 +106,8 @@ static ssize_t do_sendfile(int out_fd, int in_fd, loff_t *ppos,
 	in_inode = file_inode(in.file);
 	out_inode = file_inode(out.file);
 	out_pos = out.file->f_pos;
-	retval = rw_verify_area(WRITE, out.file, &out_pos, count);
+	//retval = rw_verify_area(WRITE, out.file, &out_pos, count);
+	retval = count;
 	if (retval < 0)
 		goto fput_out;
 	count = retval;
@@ -307,39 +292,11 @@ static int device_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-/*
-//char buf[200];
-//int device_ioctl(struct inode *inode, struct file *filep, unsigned int cmd, unsigned long arg)
-long device_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
-{
-	int len = 200;
-	printk(DEVICE_NAME " device_compat_ioctl\n");
-	switch(cmd) {
-	case READ_IOCTL:	
-		printk(DEVICE_NAME " READ_IOCTL\n");
-		copy_to_user((char *)arg, buf, 200);
-		break;
-	
-	case WRITE_IOCTL:
-		printk(DEVICE_NAME " WRITE_IOCTL\n");
-		copy_from_user(buf, (char *)arg, len);
-		break;
-
-	default:
-		return -ENOTTY;
-	}
-	return len;
-
-}
-*/
-
 static struct file_operations fops = {
 	.read = device_read, 
 	.write = device_write,
 	.open = device_open,
 	.release = device_release,
-	//.ioctl = device_ioctl,
-	//.compat_ioctl = device_compat_ioctl,
 };
 
 static int __init sendfile_aes_init(void)
@@ -363,4 +320,7 @@ static void __exit sendfile_aes_exit(void)
 
 module_init(sendfile_aes_init);
 module_exit(sendfile_aes_exit);
+
+MODULE_AUTHOR("Konrad Beckmann <konrad.beckmann@gmail.com>");
+MODULE_DESCRIPTION("Sendfile with on-the-fly encryption");
 MODULE_LICENSE("GPL");

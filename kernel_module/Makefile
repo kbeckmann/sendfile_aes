@@ -1,3 +1,4 @@
+EXTRA_CFLAGS=-I$(PWD)/../include
 obj-m += sendfile_aes.o
 
 all:

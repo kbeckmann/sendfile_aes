@@ -6,12 +6,12 @@
 
 int main()
 {
-	char key[] = "1234abcd5678";
+	char key[] = "1234abcd567";
 
 	int handle = sendfile_aes_open(strlen(key), key);
 	sleep(5);
 
-	off_t offset = 123;
+	off_t offset = 0;
 	sendfile_aes_send(handle, 23, 42, &offset, 256);
 	sleep(5);
 
@@ -19,4 +19,3 @@ int main()
 
 	return 0;
 }
-

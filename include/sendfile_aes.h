@@ -3,14 +3,14 @@
 #pragma pack(4)
 
 enum e_message_type {
-  MESSAGE_TYPE_SET_KEY = 1,
-  MESSAGE_TYPE_GET_KEY,
-  MESSAGE_TYPE_SENDFILE
+	MESSAGE_TYPE_SET_KEY = 1,
+	MESSAGE_TYPE_GET_KEY,
+	MESSAGE_TYPE_SENDFILE
 };
 
 struct T_SENDFILE_AES_SET_KEY {
-  int key_length;
-  char key_data[0];
+	int key_length;
+	char key_data[0];
 };
 
 struct T_SENDFILE_AES_GET_KEY {

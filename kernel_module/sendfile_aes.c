@@ -80,7 +80,7 @@ static ssize_t message_set_key(struct t_data* this, const char __user *buff, siz
 			printk("%02x", this->key->key_data[i]);
 		printk("]\n");
 	}
-	
+
 	this->message = 0;
 	return 0;
 }
@@ -92,6 +92,7 @@ static ssize_t message_sendfile(struct t_data* this, const char __user *buff, si
 	ssize_t n;
 	struct file *file_in;
 	struct file *file_out;
+	loff_t offset = 0;
 
 	printk(DEVICE_NAME " enum: %ld, int: %ld, off_t*: %ld, size_t: %ld, "
 		"T_SENDFILE_AES_SENDFILE:%ld\n",
@@ -127,7 +128,6 @@ static ssize_t message_sendfile(struct t_data* this, const char __user *buff, si
 	file_out = fget(message.out_fd);
 	while ((n = file_in->f_op->read(file_in, tmp_buf,
 		sizeof(tmp_buf), &file_in->f_pos)) > 0) {
-		loff_t offset = 0;
 
 		// "encrypt"
 		ssize_t i;
@@ -140,10 +140,22 @@ static ssize_t message_sendfile(struct t_data* this, const char __user *buff, si
 
 		// write to out_fd
 		file_write(file_out, tmp_buf, n, &offset);
-		tmp_buf[sizeof(tmp_buf) - 1] = '\0';
-		printk(DEVICE_NAME " message_sendfile(): [%s]\n", tmp_buf);
+		{
+			char c;
+			int i = 0;
+			printk(DEVICE_NAME " message_sendfile(): [");
+			while ((c = tmp_buf[i])) {
+				if (++i == sizeof(tmp_buf))
+					break;
+				printk("%c", c);
+			}
+			printk("]\n");
+		}
+//		tmp_buf[sizeof(tmp_buf) - 1] = '\0';
+//		printk(DEVICE_NAME " message_sendfile(): [%s]\n", tmp_buf);
+		printk(DEVICE_NAME " n= %ld\n", n);
 	}
-	printk(DEVICE_NAME " n= %d\n", n);
+	printk(DEVICE_NAME " (after loop) n= %ld\n", n);
 	this->message = message.count;
 	printk(DEVICE_NAME " message: %d\n", this->message);
 	return this->message;

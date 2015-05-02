@@ -2,15 +2,21 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
+#include <assert.h>
 
 #include "sendfile_aes.h"
 
 static char buf[200];
 
-int sendfile_aes_open(size_t key_length, char* key_data)
+int sendfile_aes_open(char* key_data, size_t key_length, char* iv_data, size_t iv_length)
 {
+	assert(key_length == 32);
+	assert(iv_length == 16);
+
 	int fd = -1;
-	SENDFILE_AES_SET_KEY(key_length, message);
+	SENDFILE_AES_BUILD_MESSAGE(SET_KEY, message, set_key);
+
+	printf("sendfile_aes_open(%p, %ld, %p, %ld)\n", key_data, key_length, iv_data, iv_length);
 
 	printf("enum: %ld, int: %ld, off_t*: %ld, size_t: %ld, SENDFILE_AES_SET_KEY:%ld\n",
 		   sizeof(enum e_message_type),
@@ -20,19 +26,29 @@ int sendfile_aes_open(size_t key_length, char* key_data)
 		   sizeof(message)
 		  );
 
-	memcpy(&message.key_data, key_data, key_length);
+	memcpy(set_key->key_data, key_data, key_length);
+	set_key->key_length = key_length;
+	memcpy(set_key->iv_data, iv_data, iv_length);
+	set_key->iv_length = iv_length;
 
 	printf("Dumping message struct \n\t"
 		   "sizeof(message): %ld\n\t"
 		   "message_type: %d\n\t"
 		   "key_length: %d\n\t"
 		   "key_data: [",
-		   sizeof(message), message.message_type, message.key_length);
+		   sizeof(message), message.message_type, set_key->key_length);
 
 	{
 		int i;
-		for (i = 0; i < message.key_length; i++)
-			printf("%c", message.key_data[i]);
+		for (i = 0; i < set_key->key_length; i++)
+			printf("%02x", (unsigned char) set_key->key_data[i]);
+		printf("]\n\t");
+	}
+	printf("iv_data: [");
+	{
+		int i;
+		for (i = 0; i < set_key->iv_length; i++)
+			printf("%02x", (unsigned char) set_key->iv_data[i]);
 		printf("]\n");
 	}
 
@@ -57,11 +73,11 @@ int sendfile_aes_open(size_t key_length, char* key_data)
 int sendfile_aes_send(int fd, int out_fd, int in_fd, off_t *offset, size_t count)
 {
 	int ret = -1;
-	SENDFILE_AES_BUILD_MESSAGE(SENDFILE, message);
-	message.payload.out_fd = out_fd;
-	message.payload.in_fd = in_fd;
-	message.payload.offset = offset;
-	message.payload.count = count;
+	SENDFILE_AES_BUILD_MESSAGE(SENDFILE, message, payload);
+	payload->out_fd = out_fd;
+	payload->in_fd = in_fd;
+	payload->offset = offset;
+	payload->count = count;
 
 	printf("enum: %ld, int: %ld, off_t*: %ld, size_t: %ld, SENDFILE_AES_SENDFILE:%ld\n",
 		sizeof(enum e_message_type),

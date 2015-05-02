@@ -7,6 +7,11 @@
 #include <linux/slab.h>
 #include <linux/syscalls.h>
 
+#include <linux/scatterlist.h>
+#include <linux/crypto.h>
+#include <linux/err.h>
+#include <crypto/aes.h>
+
 #include "sendfile_aes.h"
 
 #define DEVICE_NAME "sendfile_aes"
@@ -18,7 +23,85 @@ static int num_open_files = 0;
 struct t_data {
 	struct T_SENDFILE_AES_SET_KEY *key;
 	int message;
+/*
+	struct {
+		// TODO: Read Key and IV from userspace
+		char key[32];
+		char iv[16];
+	} aes_key_data;
+*/
+	struct crypto_blkcipher *crypto_session;
 };
+
+/*
+ * Should be used for buffers allocated with ceph_kvmalloc().
+ * Currently these are encrypt out-buffer (ceph_buffer) and decrypt
+ * in-buffer (msg front).
+ *
+ * Dispose of @sgt with teardown_sgtable().
+ *
+ * @prealloc_sg is to avoid memory allocation inside sg_alloc_table()
+ * in cases where a single sg is sufficient.  No attempt to reduce the
+ * number of sgs by squeezing physically contiguous pages together is
+ * made though, for simplicity.
+ */
+static int setup_sgtable(struct sg_table *sgt, struct scatterlist *prealloc_sg,
+			 const void *buf, unsigned int buf_len)
+{
+	struct scatterlist *sg;
+	const bool is_vmalloc = is_vmalloc_addr(buf);
+	unsigned int off = offset_in_page(buf);
+	unsigned int chunk_cnt = 1;
+	unsigned int chunk_len = PAGE_ALIGN(off + buf_len);
+	int i;
+	int ret;
+
+	if (buf_len == 0) {
+		memset(sgt, 0, sizeof(*sgt));
+		return -EINVAL;
+	}
+
+	if (is_vmalloc) {
+		chunk_cnt = chunk_len >> PAGE_SHIFT;
+		chunk_len = PAGE_SIZE;
+	}
+
+	if (chunk_cnt > 1) {
+		ret = sg_alloc_table(sgt, chunk_cnt, GFP_NOFS);
+		if (ret)
+			return ret;
+	} else {
+		WARN_ON(chunk_cnt != 1);
+		sg_init_table(prealloc_sg, 1);
+		sgt->sgl = prealloc_sg;
+		sgt->nents = sgt->orig_nents = 1;
+	}
+
+	for_each_sg(sgt->sgl, sg, sgt->orig_nents, i) {
+		struct page *page;
+		unsigned int len = min(chunk_len - off, buf_len);
+
+		if (is_vmalloc)
+			page = vmalloc_to_page(buf);
+		else
+			page = virt_to_page(buf);
+
+		sg_set_page(sg, page, len, off);
+
+		off = 0;
+		buf += len;
+		buf_len -= len;
+	}
+	WARN_ON(buf_len != 0);
+
+	return 0;
+}
+
+static void teardown_sgtable(struct sg_table *sgt)
+{
+	if (sgt->orig_nents > 1)
+		sg_free_table(sgt);
+}
 
 static int file_write(struct file* file, unsigned char* data, size_t size, loff_t *offset)
 {
@@ -53,6 +136,7 @@ static ssize_t device_read(struct file *file, char __user *buffer, size_t len, l
 static ssize_t message_set_key(struct t_data* this, const char __user *buff, size_t len)
 {
 	struct T_SENDFILE_AES_SET_KEY set_key;
+
 	if (len < sizeof(set_key)) {
 		printk(DEVICE_NAME " write(): message too short (1)\n");
 		return -1;
@@ -81,6 +165,30 @@ static ssize_t message_set_key(struct t_data* this, const char __user *buff, siz
 		printk("]\n");
 	}
 
+	{
+		int i;
+		printk(DEVICE_NAME " write(): iv: [");
+		for (i = 0; i < this->key->iv_length; i++)
+			printk("%02x", this->key->iv_data[i]);
+		printk("]\n");
+	}
+
+	// TODO: Implement key expension from userspace key
+//	memcpy(&this->aes_key_data.key, "\x42\x93\x20\x9e\x7a\x46\x38\xbe\x35\xc2\xc2\x91\x53\x3a\x3c\x0b\xe4\x86\x7b\x6b\xd7\x66\x98\x04\x58\xc0\x2b\x3b\x02\x9e\x7d\xf6", 32);
+//	memcpy(&this->aes_key_data.iv, "\x09\xca\xa1\x9c\x39\x40\x62\x0b\x6b\x97\xa5\x0a\x7e\x2a\x97\x1d", 16);
+
+
+
+	// Initiate crypto sesion
+	this->crypto_session = crypto_alloc_blkcipher("cbc(aes)", 0, CRYPTO_ALG_ASYNC);
+	if (IS_ERR(this->crypto_session)) {
+		printk(DEVICE_NAME " error calling crypto_alloc_aead() = 0x%p\n", this->crypto_session);
+		this->message = -1;
+		return -1;
+	}
+
+	printk(DEVICE_NAME " crypto_aead = 0x%p\n", this->crypto_session);
+
 	this->message = 0;
 	return 0;
 }
@@ -88,7 +196,8 @@ static ssize_t message_set_key(struct t_data* this, const char __user *buff, siz
 static ssize_t message_sendfile(struct t_data* this, const char __user *buff, size_t len)
 {
 	struct T_SENDFILE_AES_SENDFILE message;
-	char tmp_buf[100];
+	char tmp_buf[32];
+	char dst_buf[64];
 	ssize_t n;
 	struct file *file_in;
 	struct file *file_out;
@@ -126,33 +235,101 @@ static ssize_t message_sendfile(struct t_data* this, const char __user *buff, si
 
 	file_in = fget(message.in_fd);
 	file_out = fget(message.out_fd);
+	memset(tmp_buf, 0, sizeof(tmp_buf));
 	while ((n = file_in->f_op->read(file_in, tmp_buf,
 		sizeof(tmp_buf), &file_in->f_pos)) > 0) {
 
-		// "encrypt"
-		ssize_t i;
+		// Encrypt!
+		if (1 == 1) {
+			const void *key = this->key->key_data;
+			int key_len = this->key->key_length;
+			void *dst = dst_buf;
+			size_t dst_len_value = 0;
+			size_t *dst_len = &dst_len_value;
+			const void *src = tmp_buf;
+			size_t src_len = n;
 
-		printk(DEVICE_NAME " message_sendfile(): f_op->read()\n");
-		for (i = 0; i < n; i++) {
-			// mostly harmless scrambling
-			if (tmp_buf[i] == 'A') tmp_buf[i] = 'B';
+			struct scatterlist sg_in[2], prealloc_sg;
+			struct sg_table sg_out;
+			struct blkcipher_desc desc = { .tfm = this->crypto_session, .flags = 0 };
+			int ret;
+			void *iv;
+			int ivsize;
+			size_t zero_padding = (0x10 - (src_len & 0x0f));
+			char pad[16];
+
+			memset(pad, zero_padding, zero_padding);
+
+			*dst_len = src_len + zero_padding;
+			printk(DEVICE_NAME " dst_len: %ld", *dst_len);
+
+			sg_init_table(sg_in, 2);
+			sg_set_buf(&sg_in[0], src, src_len);
+			sg_set_buf(&sg_in[1], pad, zero_padding);
+			ret = setup_sgtable(&sg_out, &prealloc_sg, dst, *dst_len);
+			if (ret)
+				goto out_tfm;
+
+			printk(DEVICE_NAME " key: %p, key_len: %d\n", key, key_len);
+			crypto_blkcipher_setkey((void *)this->crypto_session, key, key_len);
+
+			iv = crypto_blkcipher_crt(this->crypto_session)->iv;
+			ivsize = crypto_blkcipher_ivsize(this->crypto_session);
+			memcpy(iv, this->key->iv_data, this->key->iv_length);
+
+			print_hex_dump(KERN_ERR, "enc key: ", DUMP_PREFIX_NONE, 16, 1,
+						   key, key_len, 1);
+			print_hex_dump(KERN_ERR, "enc src: ", DUMP_PREFIX_NONE, 16, 1,
+						   src, src_len, 1);
+			print_hex_dump(KERN_ERR, "enc pad: ", DUMP_PREFIX_NONE, 16, 1,
+						   pad, zero_padding, 1);
+			print_hex_dump(KERN_ERR, "iv:      ", DUMP_PREFIX_NONE, 16, 1,
+						   iv, ivsize, 1);
+			ret = crypto_blkcipher_encrypt(&desc, sg_out.sgl, sg_in,
+										   src_len + zero_padding);
+			if (ret < 0) {
+				pr_err("ceph_aes_crypt failed %d\n", ret);
+				goto out_sg;
+			}
+			print_hex_dump(KERN_ERR, "enc out: ", DUMP_PREFIX_NONE, 16, 1,
+						   dst, *dst_len, 1);
+
+			out_sg:
+			teardown_sgtable(&sg_out);
+			out_tfm:
+			//crypto_free_blkcipher(tfm);
+
+			printk(DEVICE_NAME " ok\n");
+
+			n = *dst_len;
+
+		} else {
+			ssize_t i;
+
+			printk(DEVICE_NAME " message_sendfile(): f_op->read()\n");
+			for (i = 0; i < n; i++) {
+				// mostly harmless scrambling
+				if (tmp_buf[i] == 'A')
+					dst_buf[i] = 'B';
+				else
+					dst_buf[i] = tmp_buf[i];
+			}
 		}
 
+
 		// write to out_fd
-		file_write(file_out, tmp_buf, n, &offset);
+		file_write(file_out, dst_buf, n, &offset);
 		{
 			char c;
 			int i = 0;
 			printk(DEVICE_NAME " message_sendfile(): [");
-			while ((c = tmp_buf[i])) {
-				if (++i == sizeof(tmp_buf))
+			while ((c = dst_buf[i])) {
+				if (++i == sizeof(dst_buf))
 					break;
-				printk("%c", c);
+				printk("%02x", c);
 			}
 			printk("]\n");
 		}
-//		tmp_buf[sizeof(tmp_buf) - 1] = '\0';
-//		printk(DEVICE_NAME " message_sendfile(): [%s]\n", tmp_buf);
 		printk(DEVICE_NAME " n= %ld\n", n);
 	}
 	printk(DEVICE_NAME " (after loop) n= %ld\n", n);

@@ -24,8 +24,8 @@
 int aes_init(unsigned char *key_data, int key_data_len, unsigned char *salt, EVP_CIPHER_CTX *e_ctx,
 			 EVP_CIPHER_CTX *d_ctx)
 {
-	int i, nrounds = 5;
-	unsigned char key[32], iv[32];
+	int i, nrounds = 100;
+	unsigned char key[32], iv[16];
 
 	/*
    * Gen key & IV for AES 256 CBC mode. A SHA1 digest is used to hash the supplied key material.
@@ -36,6 +36,21 @@ int aes_init(unsigned char *key_data, int key_data_len, unsigned char *salt, EVP
 	if (i != 32) {
 		printf("Key size is %d bits - should be 256 bits\n", i);
 		return -1;
+	}
+
+	{
+		size_t i;
+		printf("key: [");
+		for (i = 0; i < sizeof(key); i++)
+			printf("%02x", key[i]);
+		printf("]\n");
+	}
+	{
+		size_t i;
+		printf("iv: [");
+		for (i = 0; i < sizeof(iv); i++)
+			printf("%02x", iv[i]);
+		printf("]\n");
 	}
 
 	EVP_CIPHER_CTX_init(e_ctx);
@@ -106,18 +121,22 @@ int main(int argc, char **argv)
      compiled in salt. We just read the bit pattern created by these two 4 byte
      integers on the stack as 64 bits of contigous salt material -
      ofcourse this only works if sizeof(int) >= 4 */
-	unsigned int salt[] = {12345, 54321};
+//	unsigned int salt[] = {12345, 54321};
+//	unsigned char salt[] = "\0\0\0\0\0\0\0\0";
+	unsigned char salt[] = "AAAAAAAA";
 	unsigned char *key_data;
 	int key_data_len, i;
-	char *input[] = {"A",
+	char *input[] = {"A\n",/*
 					 "ABCD",
 					 "abcd", "this is a test", "this is a bigger test",
-					 "\nWho are you ?\nI am the 'Doctor'.\n'Doctor' who ?\nPrecisely!",
+					 "\nWho are you ?\nI am the 'Doctor'.\n'Doctor' who ?\nPrecisely!",*/
 					 NULL};
+
+//	input[0][1] = '\n';
 
 	/* the key_data is read from the argument list */
 	key_data = (unsigned char *)argv[1];
-	key_data_len = strlen(argv[1]);
+	key_data_len = strlen(argv[1]) - 1;
 
 	/* gen key and iv. init the cipher ctx object */
 	if (aes_init(key_data, key_data_len, (unsigned char *)&salt, &en, &de)) {
@@ -135,7 +154,7 @@ int main(int argc, char **argv)
        return length of the string without counting the '\0' string marker. We always
        pass in the marker byte to the encrypt/decrypt functions so that after decryption
        we end up with a legal C string */
-		olen = len = strlen(input[i])+1;
+		olen = len = strlen(input[i]);//+1;
 
 		ciphertext = aes_encrypt(&en, (unsigned char *)input[i], &len);
 

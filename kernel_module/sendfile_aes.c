@@ -236,26 +236,41 @@ static ssize_t message_sendfile(struct t_data* this, const char __user *buff, si
 	file_in = fget(message.in_fd);
 	file_out = fget(message.out_fd);
 	memset(tmp_buf, 0, sizeof(tmp_buf));
+
+
+
+
+	const void *key = this->key->key_data;
+	int key_len = this->key->key_length;
+	void *dst = dst_buf;
+	size_t dst_len_value = 0;
+	size_t *dst_len = &dst_len_value;
+	const void *src = tmp_buf;
+	void *iv;
+	int ivsize;
+
+	printk(DEVICE_NAME " key: %p, key_len: %d\n", key, key_len);
+	crypto_blkcipher_setkey((void *)this->crypto_session, key, key_len);
+
+	iv = crypto_blkcipher_crt(this->crypto_session)->iv;
+	ivsize = crypto_blkcipher_ivsize(this->crypto_session);
+	memcpy(iv, this->key->iv_data, this->key->iv_length);
+
+	printk(DEVICE_NAME " ivsize: %d\n", ivsize);
+
+
 	while ((n = file_in->f_op->read(file_in, tmp_buf,
 		sizeof(tmp_buf), &file_in->f_pos)) > 0) {
 
 		// Encrypt!
 		if (1 == 1) {
-			const void *key = this->key->key_data;
-			int key_len = this->key->key_length;
-			void *dst = dst_buf;
-			size_t dst_len_value = 0;
-			size_t *dst_len = &dst_len_value;
-			const void *src = tmp_buf;
 			size_t src_len = n;
 
 			struct scatterlist sg_in[2], prealloc_sg;
 			struct sg_table sg_out;
 			struct blkcipher_desc desc = { .tfm = this->crypto_session, .flags = 0 };
 			int ret;
-			void *iv;
-			int ivsize;
-			size_t zero_padding = (0x10 - (src_len & 0x0f));
+			size_t zero_padding = (0x10 - (src_len & 0x0f)) % 0x10;
 			char pad[16];
 
 			memset(pad, zero_padding, zero_padding);
@@ -270,12 +285,6 @@ static ssize_t message_sendfile(struct t_data* this, const char __user *buff, si
 			if (ret)
 				goto out_tfm;
 
-			printk(DEVICE_NAME " key: %p, key_len: %d\n", key, key_len);
-			crypto_blkcipher_setkey((void *)this->crypto_session, key, key_len);
-
-			iv = crypto_blkcipher_crt(this->crypto_session)->iv;
-			ivsize = crypto_blkcipher_ivsize(this->crypto_session);
-			memcpy(iv, this->key->iv_data, this->key->iv_length);
 
 			print_hex_dump(KERN_ERR, "enc key: ", DUMP_PREFIX_NONE, 16, 1,
 						   key, key_len, 1);
@@ -326,7 +335,7 @@ static ssize_t message_sendfile(struct t_data* this, const char __user *buff, si
 			while ((c = dst_buf[i])) {
 				if (++i == sizeof(dst_buf))
 					break;
-				printk("%02x", c);
+				printk("%02x", (unsigned char) c);
 			}
 			printk("]\n");
 		}

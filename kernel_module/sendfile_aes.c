@@ -26,7 +26,7 @@
 #define DEVICE_NAME "sendfile_aes"
 
 #define CHUNK_SIZE 1024
-#define AES_MAX_PADDING 32
+#define MAX_PADDING 32
 
 static int major;
 static int message_err = -1;
@@ -37,8 +37,11 @@ struct t_data {
 	int message;
 	struct crypto_blkcipher *crypto_session;
 	char tmp_buf[CHUNK_SIZE];
-	char dst_buf[CHUNK_SIZE + AES_MAX_PADDING];
+	char dst_buf[CHUNK_SIZE + MAX_PADDING];
 };
+
+
+//TODO: understand the code below :)
 
 /*
  * Should be used for buffers allocated with ceph_kvmalloc().
@@ -164,21 +167,10 @@ static ssize_t message_set_key(struct t_data* this, const char __user *buff, siz
 		return -1;
 	}
 
-	{
-		int i;
-		DBG_PRINT(DEVICE_NAME " write(): key: [");
-		for (i = 0; i < this->key->key_length; i++)
-			DBG_PRINT("%02x", this->key->key_data[i]);
-		DBG_PRINT("]\n");
-	}
-
-	{
-		int i;
-		DBG_PRINT(DEVICE_NAME " write(): iv: [");
-		for (i = 0; i < this->key->iv_length; i++)
-			DBG_PRINT("%02x", this->key->iv_data[i]);
-		DBG_PRINT("]\n");
-	}
+	DBG_PRINT_HEX(KERN_ERR, " key: ", DUMP_PREFIX_NONE, 16, 1,
+				  this->key->key_data, this->key->key_length, 1);
+	DBG_PRINT_HEX(KERN_ERR, " iv : ", DUMP_PREFIX_NONE, 16, 1,
+				  this->key->iv_data, this->key->iv_length, 1);
 
 	// Initiate crypto sesion
 	this->crypto_session = crypto_alloc_blkcipher("cbc(aes)", 0, CRYPTO_ALG_ASYNC);
@@ -194,21 +186,101 @@ static ssize_t message_set_key(struct t_data* this, const char __user *buff, siz
 	return 0;
 }
 
-static ssize_t message_sendfile(struct t_data* this, const char __user *buff, size_t len)
+
+static ssize_t do_sendfile_aes_encrypt(struct t_data *this,
+									   struct T_SENDFILE_AES_SENDFILE *message)
 {
-	struct T_SENDFILE_AES_SENDFILE message;
 	ssize_t n;
 	struct file *file_in;
 	struct file *file_out;
 	loff_t offset = 0;
+	const void *key = this->key->key_data;
+	int key_len = this->key->key_length;
+	void *dst = this->dst_buf;
+	size_t dst_len_value = 0;
+	size_t *dst_len = &dst_len_value;
+	const void *src = this->tmp_buf;
+	void *iv;
+	int ivsize;
 
-	DBG_PRINT(DEVICE_NAME " enum: %ld, int: %ld, off_t*: %ld, size_t: %ld, "
-		"T_SENDFILE_AES_SENDFILE:%ld\n",
-		sizeof(enum e_message_type),
-		sizeof(int),
-		sizeof(off_t*),
-		sizeof(size_t),
-		sizeof(message));
+	file_in = fget(message->in_fd);
+	file_out = fget(message->out_fd);
+
+	//TODO: handle error on file_in and file_out
+
+	crypto_blkcipher_setkey((void *)this->crypto_session, key, key_len);
+	iv = crypto_blkcipher_crt(this->crypto_session)->iv;
+	ivsize = crypto_blkcipher_ivsize(this->crypto_session);
+	DBG_PRINT(DEVICE_NAME " ivsize: %d, key->iv_length\n", ivsize, this->key->iv_length);
+	memcpy(iv, this->key->iv_data, this->key->iv_length);
+
+	while ((n = file_in->f_op->read(file_in, this->tmp_buf,
+		sizeof(this->tmp_buf), &file_in->f_pos)) > 0) {
+
+		// Encrypt!
+		size_t src_len = n;
+
+		struct scatterlist sg_in[2], prealloc_sg;
+		struct sg_table sg_out;
+		struct blkcipher_desc desc = { .tfm = this->crypto_session, .flags = 0 };
+		int ret;
+		size_t zero_padding = (0x10 - (src_len & 0x0f)) % 0x10;
+		char pad[16];
+
+		memset(pad, zero_padding, zero_padding);
+
+		*dst_len = src_len + zero_padding;
+		DBG_PRINT(DEVICE_NAME " dst_len: %ld", *dst_len);
+
+		sg_init_table(sg_in, 2);
+		sg_set_buf(&sg_in[0], src, src_len);
+		sg_set_buf(&sg_in[1], pad, zero_padding);
+		ret = setup_sgtable(&sg_out, &prealloc_sg, dst, *dst_len);
+		if (ret) {
+			DBG_PRINT(DEVICE_NAME " setup_sgtable() failed");
+			break;
+		}
+
+		DBG_PRINT_HEX(KERN_ERR, "enc key: ", DUMP_PREFIX_NONE, 16, 1,
+					  key, key_len, 1);
+		DBG_PRINT_HEX(KERN_ERR, "enc src: ", DUMP_PREFIX_NONE, 16, 1,
+					  src, src_len, 1);
+		DBG_PRINT_HEX(KERN_ERR, "enc pad: ", DUMP_PREFIX_NONE, 16, 1,
+					  pad, zero_padding, 1);
+		DBG_PRINT_HEX(KERN_ERR, "iv:      ", DUMP_PREFIX_NONE, 16, 1,
+					  iv, ivsize, 1);
+		ret = crypto_blkcipher_encrypt(&desc, sg_out.sgl, sg_in,
+									   src_len + zero_padding);
+		if (ret < 0) {
+			pr_err("sendfile_aes failed %d\n", ret);
+			goto out_sg;
+		}
+		DBG_PRINT_HEX(KERN_ERR, "enc out: ", DUMP_PREFIX_NONE, 16, 1,
+					  dst, *dst_len, 1);
+
+		out_sg:
+		teardown_sgtable(&sg_out);
+
+		// n is used outside the loop to return the actual written bytes
+		n = *dst_len;
+		DBG_PRINT(DEVICE_NAME " n= %ld\n", n);
+
+		// write to out_fd
+		file_write(file_out, this->dst_buf, n, &offset);
+	}
+	DBG_PRINT(DEVICE_NAME " (after loop) n= %ld\n", n);
+	this->message = message->count;
+	DBG_PRINT(DEVICE_NAME " message: %d\n", this->message);
+
+	// clean up temp buffers so we don't leave plaintext in RAM?
+	//	memset(this->tmp_buf, 0, sizeof(this->tmp_buf));
+	//	memset(this->dst_buf, 0, sizeof(this->dst_buf));
+	return this->message;
+}
+
+static ssize_t message_sendfile(struct t_data* this, const char __user *buff, size_t len)
+{
+	struct T_SENDFILE_AES_SENDFILE message;
 
 	if (len < sizeof(message)) {
 		DBG_PRINT(DEVICE_NAME " size mismatch %ld should be %ld\n",
@@ -231,119 +303,7 @@ static ssize_t message_sendfile(struct t_data* this, const char __user *buff, si
 
 	DBG_PRINT(DEVICE_NAME " message received (*offset=%ld)\n",
 		   *message.offset);
-
-	file_in = fget(message.in_fd);
-	file_out = fget(message.out_fd);
-	memset(this->tmp_buf, 0, sizeof(this->tmp_buf));
-
-
-
-
-	const void *key = this->key->key_data;
-	int key_len = this->key->key_length;
-	void *dst = this->dst_buf;
-	size_t dst_len_value = 0;
-	size_t *dst_len = &dst_len_value;
-	const void *src = this->tmp_buf;
-	void *iv;
-	int ivsize;
-
-	DBG_PRINT(DEVICE_NAME " key: %p, key_len: %d\n", key, key_len);
-	crypto_blkcipher_setkey((void *)this->crypto_session, key, key_len);
-
-	iv = crypto_blkcipher_crt(this->crypto_session)->iv;
-	ivsize = crypto_blkcipher_ivsize(this->crypto_session);
-	memcpy(iv, this->key->iv_data, this->key->iv_length);
-
-	DBG_PRINT(DEVICE_NAME " ivsize: %d\n", ivsize);
-
-
-	while ((n = file_in->f_op->read(file_in, this->tmp_buf,
-		sizeof(this->tmp_buf), &file_in->f_pos)) > 0) {
-
-		// Encrypt!
-		if (1 == 1) {
-			size_t src_len = n;
-
-			struct scatterlist sg_in[2], prealloc_sg;
-			struct sg_table sg_out;
-			struct blkcipher_desc desc = { .tfm = this->crypto_session, .flags = 0 };
-			int ret;
-			size_t zero_padding = (0x10 - (src_len & 0x0f)) % 0x10;
-			char pad[16];
-
-			memset(pad, zero_padding, zero_padding);
-
-			*dst_len = src_len + zero_padding;
-			DBG_PRINT(DEVICE_NAME " dst_len: %ld", *dst_len);
-
-			sg_init_table(sg_in, 2);
-			sg_set_buf(&sg_in[0], src, src_len);
-			sg_set_buf(&sg_in[1], pad, zero_padding);
-			ret = setup_sgtable(&sg_out, &prealloc_sg, dst, *dst_len);
-			if (ret)
-				goto out_tfm;
-
-
-			DBG_PRINT_HEX(KERN_ERR, "enc key: ", DUMP_PREFIX_NONE, 16, 1,
-						   key, key_len, 1);
-			DBG_PRINT_HEX(KERN_ERR, "enc src: ", DUMP_PREFIX_NONE, 16, 1,
-						   src, src_len, 1);
-			DBG_PRINT_HEX(KERN_ERR, "enc pad: ", DUMP_PREFIX_NONE, 16, 1,
-						   pad, zero_padding, 1);
-			DBG_PRINT_HEX(KERN_ERR, "iv:      ", DUMP_PREFIX_NONE, 16, 1,
-						   iv, ivsize, 1);
-			ret = crypto_blkcipher_encrypt(&desc, sg_out.sgl, sg_in,
-										   src_len + zero_padding);
-			if (ret < 0) {
-				pr_err("ceph_aes_crypt failed %d\n", ret);
-				goto out_sg;
-			}
-			DBG_PRINT_HEX(KERN_ERR, "enc out: ", DUMP_PREFIX_NONE, 16, 1,
-						   dst, *dst_len, 1);
-
-			out_sg:
-			teardown_sgtable(&sg_out);
-			out_tfm:
-			//crypto_free_blkcipher(tfm);
-
-			DBG_PRINT(DEVICE_NAME " ok\n");
-
-			n = *dst_len;
-
-		} else {
-			ssize_t i;
-
-			DBG_PRINT(DEVICE_NAME " message_sendfile(): f_op->read()\n");
-			for (i = 0; i < n; i++) {
-				// mostly harmless scrambling
-				if (this->tmp_buf[i] == 'A')
-					this->dst_buf[i] = 'B';
-				else
-					this->dst_buf[i] = this->tmp_buf[i];
-			}
-		}
-
-
-		// write to out_fd
-		file_write(file_out, this->dst_buf, n, &offset);
-		{
-			char c;
-			int i = 0;
-			DBG_PRINT(DEVICE_NAME " message_sendfile(): [");
-			while ((c = this->dst_buf[i])) {
-				if (++i == sizeof(this->dst_buf))
-					break;
-				DBG_PRINT("%02x", (unsigned char) c);
-			}
-			DBG_PRINT("]\n");
-		}
-		DBG_PRINT(DEVICE_NAME " n= %ld\n", n);
-	}
-	DBG_PRINT(DEVICE_NAME " (after loop) n= %ld\n", n);
-	this->message = message.count;
-	DBG_PRINT(DEVICE_NAME " message: %d\n", this->message);
-	return this->message;
+	return do_sendfile_aes_encrypt(this, &message);
 }
 
 static ssize_t device_write(struct file *file, const char __user *buff, size_t len, loff_t *off)

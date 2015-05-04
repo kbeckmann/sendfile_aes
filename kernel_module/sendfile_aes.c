@@ -12,6 +12,10 @@
 #include <linux/err.h>
 #include <crypto/aes.h>
 
+#include <asm/segment.h>
+#include <asm/uaccess.h>
+#include <linux/buffer_head.h>
+
 #include "sendfile_aes.h"
 
 //#define _DEBUG_
@@ -27,6 +31,7 @@
 
 #define CHUNK_SIZE 1024
 #define MAX_PADDING 32
+
 
 static int major;
 static int message_err = -1;
@@ -113,6 +118,19 @@ static void teardown_sgtable(struct sg_table *sgt)
 		sg_free_table(sgt);
 }
 
+static int file_read(struct file* file, loff_t *offset, unsigned char* data, unsigned int size) {
+	mm_segment_t oldfs;
+	int ret;
+
+	oldfs = get_fs();
+	set_fs(get_ds());
+
+	ret = vfs_read(file, data, size, offset);
+
+	set_fs(oldfs);
+	return ret;
+}
+
 static int file_write(struct file* file, unsigned char* data, size_t size, loff_t *offset)
 {
 	mm_segment_t oldfs;
@@ -188,12 +206,11 @@ static ssize_t message_set_key(struct t_data* this, const char __user *buff, siz
 
 
 static ssize_t do_sendfile_aes_encrypt(struct t_data *this,
-									   struct T_SENDFILE_AES_SENDFILE *message)
+				   struct T_SENDFILE_AES_SENDFILE *message)
 {
 	ssize_t n;
 	struct file *file_in;
 	struct file *file_out;
-	loff_t offset = 0;
 	const void *key = this->key->key_data;
 	int key_len = this->key->key_length;
 	void *dst = this->dst_buf;
@@ -202,6 +219,9 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this,
 	const void *src = this->tmp_buf;
 	void *iv;
 	int ivsize;
+	int ret;
+	loff_t in_off = 0;
+	loff_t out_off = 0;
 
 	file_in = fget(message->in_fd);
 	file_out = fget(message->out_fd);
@@ -211,19 +231,15 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this,
 	crypto_blkcipher_setkey((void *)this->crypto_session, key, key_len);
 	iv = crypto_blkcipher_crt(this->crypto_session)->iv;
 	ivsize = crypto_blkcipher_ivsize(this->crypto_session);
-	DBG_PRINT(DEVICE_NAME " ivsize: %d, key->iv_length\n", ivsize, this->key->iv_length);
+	DBG_PRINT(DEVICE_NAME " ivsize: %d, key->iv_length: %d\n", ivsize, this->key->iv_length);
 	memcpy(iv, this->key->iv_data, this->key->iv_length);
 
-	while ((n = file_in->f_op->read(file_in, this->tmp_buf,
-		sizeof(this->tmp_buf), &file_in->f_pos)) > 0) {
-
+	while ((n = file_read(file_in, &in_off, this->tmp_buf, sizeof(this->tmp_buf)))) {
 		// Encrypt!
 		size_t src_len = n;
-
 		struct scatterlist sg_in[2], prealloc_sg;
 		struct sg_table sg_out;
 		struct blkcipher_desc desc = { .tfm = this->crypto_session, .flags = 0 };
-		int ret;
 		size_t zero_padding = (0x10 - (src_len & 0x0f)) % 0x10;
 		char pad[16];
 
@@ -266,7 +282,7 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this,
 		DBG_PRINT(DEVICE_NAME " n= %ld\n", n);
 
 		// write to out_fd
-		file_write(file_out, this->dst_buf, n, &offset);
+		file_write(file_out, this->dst_buf, n, &out_off);
 	}
 	DBG_PRINT(DEVICE_NAME " (after loop) n= %ld\n", n);
 	this->message = message->count;

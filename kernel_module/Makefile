@@ -1,8 +1,15 @@
 EXTRA_CFLAGS=-I$(PWD)/../include
-obj-m += sendfile_aes.o
+obj-m += sendfile_aes_package.o
+sendfile_aes_package-objs += sendfile_aes.o aesni-x86_64.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
 
 clean:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+
+
+$(PWD)/aesni-x86_64.o:
+	$(CC) -c $(@:.o=.s) -o $@
+
+

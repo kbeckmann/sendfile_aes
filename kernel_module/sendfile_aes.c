@@ -1,20 +1,8 @@
 #include <asm/uaccess.h>
 #include <linux/file.h>
-#include <linux/fs.h>
 #include <linux/fsnotify.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/slab.h>
-#include <linux/syscalls.h>
-
-#include <linux/scatterlist.h>
-#include <linux/crypto.h>
-#include <linux/err.h>
-#include <crypto/aes.h>
-
-#include <asm/segment.h>
-#include <asm/uaccess.h>
-#include <linux/buffer_head.h>
 
 #include "sendfile_aes.h"
 
@@ -29,8 +17,40 @@
 #endif
 #define DEVICE_NAME "sendfile_aes"
 
-#define CHUNK_SIZE 1024
+#define CHUNK_SIZE 1024 * 10
 #define MAX_PADDING 32
+
+# define AES_MAXNR 14
+# define AES_BLOCK_SIZE 16
+
+struct aes_key_st {
+# ifdef AES_LONG
+    unsigned long rd_key[4 * (AES_MAXNR + 1)];
+# else
+    unsigned int rd_key[4 * (AES_MAXNR + 1)];
+# endif
+    int rounds;
+};
+typedef struct aes_key_st AES_KEY;
+
+
+int aesni_set_encrypt_key(const unsigned char *userKey, int bits,
+                          AES_KEY *key);
+int aesni_set_decrypt_key(const unsigned char *userKey, int bits,
+                          AES_KEY *key);
+
+void aesni_encrypt(const unsigned char *in, unsigned char *out,
+                   const AES_KEY *key);
+void aesni_decrypt(const unsigned char *in, unsigned char *out,
+                   const AES_KEY *key);
+
+void aesni_cbc_encrypt(const unsigned char *in,
+                       unsigned char *out,
+                       size_t length,
+                       const AES_KEY *key, unsigned char *ivec, int enc);
+
+int OPENSSL_ia32cap_P[128];
+
 
 
 static int major;
@@ -40,83 +60,10 @@ static int num_open_files = 0;
 struct t_data {
 	struct T_SENDFILE_AES_SET_KEY *key;
 	int message;
-	struct crypto_blkcipher *crypto_session;
 	char tmp_buf[CHUNK_SIZE];
 	char dst_buf[CHUNK_SIZE + MAX_PADDING];
+	AES_KEY aes_key;
 };
-
-
-//TODO: understand the code below :)
-
-/*
- * Should be used for buffers allocated with ceph_kvmalloc().
- * Currently these are encrypt out-buffer (ceph_buffer) and decrypt
- * in-buffer (msg front).
- *
- * Dispose of @sgt with teardown_sgtable().
- *
- * @prealloc_sg is to avoid memory allocation inside sg_alloc_table()
- * in cases where a single sg is sufficient.  No attempt to reduce the
- * number of sgs by squeezing physically contiguous pages together is
- * made though, for simplicity.
- */
-static int setup_sgtable(struct sg_table *sgt, struct scatterlist *prealloc_sg,
-			 const void *buf, unsigned int buf_len)
-{
-	struct scatterlist *sg;
-	const bool is_vmalloc = is_vmalloc_addr(buf);
-	unsigned int off = offset_in_page(buf);
-	unsigned int chunk_cnt = 1;
-	unsigned int chunk_len = PAGE_ALIGN(off + buf_len);
-	int i;
-	int ret;
-
-	if (buf_len == 0) {
-		memset(sgt, 0, sizeof(*sgt));
-		return -EINVAL;
-	}
-
-	if (is_vmalloc) {
-		chunk_cnt = chunk_len >> PAGE_SHIFT;
-		chunk_len = PAGE_SIZE;
-	}
-
-	if (chunk_cnt > 1) {
-		ret = sg_alloc_table(sgt, chunk_cnt, GFP_NOFS);
-		if (ret)
-			return ret;
-	} else {
-		WARN_ON(chunk_cnt != 1);
-		sg_init_table(prealloc_sg, 1);
-		sgt->sgl = prealloc_sg;
-		sgt->nents = sgt->orig_nents = 1;
-	}
-
-	for_each_sg(sgt->sgl, sg, sgt->orig_nents, i) {
-		struct page *page;
-		unsigned int len = min(chunk_len - off, buf_len);
-
-		if (is_vmalloc)
-			page = vmalloc_to_page(buf);
-		else
-			page = virt_to_page(buf);
-
-		sg_set_page(sg, page, len, off);
-
-		off = 0;
-		buf += len;
-		buf_len -= len;
-	}
-	WARN_ON(buf_len != 0);
-
-	return 0;
-}
-
-static void teardown_sgtable(struct sg_table *sgt)
-{
-	if (sgt->orig_nents > 1)
-		sg_free_table(sgt);
-}
 
 static int file_read(struct file* file, loff_t *offset, unsigned char* data, unsigned int size) {
 	mm_segment_t oldfs;
@@ -190,36 +137,19 @@ static ssize_t message_set_key(struct t_data* this, const char __user *buff, siz
 	DBG_PRINT_HEX(KERN_ERR, " iv : ", DUMP_PREFIX_NONE, 16, 1,
 				  this->key->iv_data, this->key->iv_length, 1);
 
-	// Initiate crypto sesion
-	this->crypto_session = crypto_alloc_blkcipher("cbc(aes)", 0, CRYPTO_ALG_ASYNC);
-	if (IS_ERR(this->crypto_session)) {
-		DBG_PRINT(DEVICE_NAME " error calling crypto_alloc_aead() = 0x%p\n", this->crypto_session);
-		this->message = -1;
-		return -1;
-	}
-
-	DBG_PRINT(DEVICE_NAME " crypto_blkcipher = 0x%p\n", this->crypto_session);
+	aesni_set_encrypt_key(this->key->key_data, this->key->key_length * 8, &this->aes_key);
 
 	this->message = 0;
 	return 0;
 }
 
-
-static ssize_t do_sendfile_aes_encrypt(struct t_data *this,
-				   struct T_SENDFILE_AES_SENDFILE *message)
+static ssize_t do_sendfile_aes_encrypt(struct t_data *this, struct T_SENDFILE_AES_SENDFILE *message)
 {
 	ssize_t n;
 	struct file *file_in;
 	struct file *file_out;
-	const void *key = this->key->key_data;
-	int key_len = this->key->key_length;
-	void *dst = this->dst_buf;
 	size_t dst_len_value = 0;
 	size_t *dst_len = &dst_len_value;
-	const void *src = this->tmp_buf;
-	void *iv;
-	int ivsize;
-	int ret;
 	loff_t in_off = 0;
 	loff_t out_off = 0;
 
@@ -228,69 +158,37 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this,
 
 	//TODO: handle error on file_in and file_out
 
-	crypto_blkcipher_setkey((void *)this->crypto_session, key, key_len);
-	iv = crypto_blkcipher_crt(this->crypto_session)->iv;
-	ivsize = crypto_blkcipher_ivsize(this->crypto_session);
-	DBG_PRINT(DEVICE_NAME " ivsize: %d, key->iv_length: %d\n", ivsize, this->key->iv_length);
-	memcpy(iv, this->key->iv_data, this->key->iv_length);
-
 	while ((n = file_read(file_in, &in_off, this->tmp_buf, sizeof(this->tmp_buf)))) {
 		// Encrypt!
-		size_t src_len = n;
-		struct scatterlist sg_in[2], prealloc_sg;
-		struct sg_table sg_out;
-		struct blkcipher_desc desc = { .tfm = this->crypto_session, .flags = 0 };
-		size_t zero_padding = (0x10 - (src_len & 0x0f)) % 0x10;
-		char pad[16];
+		int n2 = n & (~0xf);
+		int n_trailing = n & 0xf;
 
-		memset(pad, zero_padding, zero_padding);
-
-		*dst_len = src_len + zero_padding;
-		DBG_PRINT(DEVICE_NAME " dst_len: %ld", *dst_len);
-
-		sg_init_table(sg_in, 2);
-		sg_set_buf(&sg_in[0], src, src_len);
-		sg_set_buf(&sg_in[1], pad, zero_padding);
-		ret = setup_sgtable(&sg_out, &prealloc_sg, dst, *dst_len);
-		if (ret) {
-			DBG_PRINT(DEVICE_NAME " setup_sgtable() failed");
-			break;
+		if (likely(n2)) {
+			aesni_cbc_encrypt(this->tmp_buf, this->dst_buf, n2, &this->aes_key, this->key->iv_data, 1);
 		}
 
-		DBG_PRINT_HEX(KERN_ERR, "enc key: ", DUMP_PREFIX_NONE, 16, 1,
-					  key, key_len, 1);
-		DBG_PRINT_HEX(KERN_ERR, "enc src: ", DUMP_PREFIX_NONE, 16, 1,
-					  src, src_len, 1);
-		DBG_PRINT_HEX(KERN_ERR, "enc pad: ", DUMP_PREFIX_NONE, 16, 1,
-					  pad, zero_padding, 1);
-		DBG_PRINT_HEX(KERN_ERR, "iv:      ", DUMP_PREFIX_NONE, 16, 1,
-					  iv, ivsize, 1);
-		ret = crypto_blkcipher_encrypt(&desc, sg_out.sgl, sg_in,
-									   src_len + zero_padding);
-		if (ret < 0) {
-			pr_err("sendfile_aes failed %d\n", ret);
-			goto out_sg;
+		if (unlikely(n_trailing)) {
+			size_t zero_padding = 0x10 - (n_trailing);
+			char pad[16];
+			memcpy(pad, this->tmp_buf + n2, n_trailing);
+			memset(pad + n_trailing, zero_padding, zero_padding);
+			aesni_cbc_encrypt(pad, this->dst_buf + n2, sizeof(pad), &this->aes_key, this->key->iv_data, 1);
+			DBG_PRINT(DEVICE_NAME " PAD! Wrote %d extra bytes\n", n_trailing);
+			n = n2 + sizeof(pad);
 		}
-		DBG_PRINT_HEX(KERN_ERR, "enc out: ", DUMP_PREFIX_NONE, 16, 1,
-					  dst, *dst_len, 1);
 
-		out_sg:
-		teardown_sgtable(&sg_out);
-
-		// n is used outside the loop to return the actual written bytes
-		n = *dst_len;
-		DBG_PRINT(DEVICE_NAME " n= %ld\n", n);
-
+		*dst_len = n;
+		DBG_PRINT(DEVICE_NAME " n= %ld, n2=%ld, n_trailing=%ld\n", n, n2, n_trailing);
 		// write to out_fd
 		file_write(file_out, this->dst_buf, n, &out_off);
 	}
-	DBG_PRINT(DEVICE_NAME " (after loop) n= %ld\n", n);
+	DBG_PRINT(DEVICE_NAME " (after loop wooo) n= %ld\n", n);
 	this->message = message->count;
 	DBG_PRINT(DEVICE_NAME " message: %d\n", this->message);
 
-	// clean up temp buffers so we don't leave plaintext in RAM?
-	//	memset(this->tmp_buf, 0, sizeof(this->tmp_buf));
-	//	memset(this->dst_buf, 0, sizeof(this->dst_buf));
+	// clean up temp buffers so we don't leave plaintext in RAM
+	memset(this->tmp_buf, 0, sizeof(this->tmp_buf));
+	memset(this->dst_buf, 0, sizeof(this->dst_buf));
 	return this->message;
 }
 
@@ -380,7 +278,7 @@ static ssize_t device_write(struct file *file, const char __user *buff, size_t l
 static int device_open(struct inode *inode, struct file *file)
 {
 	DBG_PRINT(DEVICE_NAME " open\n");
-	if (file) {
+	if (likely(file)) {
 		struct t_data* data = (struct t_data*) kmalloc(sizeof(struct t_data), GFP_KERNEL);
 
 		DBG_PRINT(DEVICE_NAME " private_data: %p\n", file->private_data);
@@ -396,7 +294,7 @@ static int device_open(struct inode *inode, struct file *file)
 
 static int device_release(struct inode *inode, struct file *file)
 {
-	if (file) {
+	if (likely(file)) {
 		DBG_PRINT(DEVICE_NAME " private_data: %p\n", file->private_data);
 		if (file->private_data) {
 			struct t_data* this = (struct t_data*)file->private_data;

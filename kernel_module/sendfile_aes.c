@@ -34,6 +34,36 @@ struct aes_key_st {
 typedef struct aes_key_st AES_KEY;
 
 
+
+// TODO use cpuid
+#define HAS_AESNI
+
+#ifdef HAS_AESNI
+#define AES_SET_ENCRYPT_KEY(...) aesni_set_encrypt_key(__VA_ARGS__)
+#define AES_CBC_ENCRYPT(...) aesni_cbc_encrypt(__VA_ARGS__)
+#else
+#define AES_SET_ENCRYPT_KEY(...) vpaes_set_encrypt_key(__VA_ARGS__)
+#define AES_CBC_ENCRYPT(...) vpaes_cbc_encrypt(__VA_ARGS__)
+#endif
+
+
+// VP-AES
+int vpaes_set_encrypt_key(const unsigned char *userKey, int bits,
+                          AES_KEY *key);
+int vpaes_set_decrypt_key(const unsigned char *userKey, int bits,
+                          AES_KEY *key);
+
+void vpaes_encrypt(const unsigned char *in, unsigned char *out,
+                   const AES_KEY *key);
+void vpaes_decrypt(const unsigned char *in, unsigned char *out,
+                   const AES_KEY *key);
+
+void vpaes_cbc_encrypt(const unsigned char *in,
+                       unsigned char *out,
+                       size_t length,
+                       const AES_KEY *key, unsigned char *ivec, int enc);
+
+// AES-NI
 int aesni_set_encrypt_key(const unsigned char *userKey, int bits,
                           AES_KEY *key);
 int aesni_set_decrypt_key(const unsigned char *userKey, int bits,
@@ -137,7 +167,7 @@ static ssize_t message_set_key(struct t_data* this, const char __user *buff, siz
 	DBG_PRINT_HEX(KERN_ERR, " iv : ", DUMP_PREFIX_NONE, 16, 1,
 				  this->key->iv_data, this->key->iv_length, 1);
 
-	aesni_set_encrypt_key(this->key->key_data, this->key->key_length * 8, &this->aes_key);
+	AES_SET_ENCRYPT_KEY(this->key->key_data, this->key->key_length * 8, &this->aes_key);
 
 	this->message = 0;
 	return 0;
@@ -164,7 +194,7 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this, struct T_SENDFILE_AE
 		int n_trailing = n & 0xf;
 
 		if (likely(n2)) {
-			aesni_cbc_encrypt(this->tmp_buf, this->dst_buf, n2, &this->aes_key, this->key->iv_data, 1);
+			AES_CBC_ENCRYPT(this->tmp_buf, this->dst_buf, n2, &this->aes_key, this->key->iv_data, 1);
 		}
 
 		if (unlikely(n_trailing)) {
@@ -172,7 +202,7 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this, struct T_SENDFILE_AE
 			char pad[16];
 			memcpy(pad, this->tmp_buf + n2, n_trailing);
 			memset(pad + n_trailing, zero_padding, zero_padding);
-			aesni_cbc_encrypt(pad, this->dst_buf + n2, sizeof(pad), &this->aes_key, this->key->iv_data, 1);
+			AES_CBC_ENCRYPT(pad, this->dst_buf + n2, sizeof(pad), &this->aes_key, this->key->iv_data, 1);
 			DBG_PRINT(DEVICE_NAME " PAD! Wrote %d extra bytes\n", n_trailing);
 			n = n2 + sizeof(pad);
 		}

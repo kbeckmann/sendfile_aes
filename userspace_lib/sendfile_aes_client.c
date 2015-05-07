@@ -6,9 +6,16 @@
 
 #include "sendfile_aes.h"
 
+//#define DEBUG
+#ifdef DEBUG
+#define DBG_PRINT(...) printf(__VA_ARGS__)
+#else
+#define DBG_PRINT(...)
+#endif
+
 static char buf[200];
 
-int sendfile_aes_open(char* key_data, size_t key_length, char* iv_data, size_t iv_length)
+int sendfile_aes_open(char* key_data, size_t key_length, char* iv_data, size_t iv_length, int encrypt)
 {
 	assert(key_length == 32);
 	assert(iv_length == 16);
@@ -16,9 +23,9 @@ int sendfile_aes_open(char* key_data, size_t key_length, char* iv_data, size_t i
 	int fd = -1;
 	SENDFILE_AES_BUILD_MESSAGE(SET_KEY, message, set_key);
 
-	printf("sendfile_aes_open(%p, %ld, %p, %ld)\n", key_data, key_length, iv_data, iv_length);
+	DBG_PRINT("sendfile_aes_open(%p, %ld, %p, %ld, %d)\n", key_data, key_length, iv_data, iv_length, encrypt);
 
-	printf("enum: %ld, int: %ld, off_t*: %ld, size_t: %ld, SENDFILE_AES_SET_KEY:%ld\n",
+	DBG_PRINT("enum: %ld, int: %ld, off_t*: %ld, size_t: %ld, SENDFILE_AES_SET_KEY:%ld\n",
 		   sizeof(enum e_message_type),
 		   sizeof(int),
 		   sizeof(off_t*),
@@ -30,8 +37,9 @@ int sendfile_aes_open(char* key_data, size_t key_length, char* iv_data, size_t i
 	set_key->key_length = key_length;
 	memcpy(set_key->iv_data, iv_data, iv_length);
 	set_key->iv_length = iv_length;
+	set_key->encrypt = encrypt;
 
-	printf("Dumping message struct \n\t"
+	DBG_PRINT("Dumping message struct \n\t"
 		   "sizeof(message): %ld\n\t"
 		   "message_type: %d\n\t"
 		   "key_length: %d\n\t"
@@ -41,16 +49,17 @@ int sendfile_aes_open(char* key_data, size_t key_length, char* iv_data, size_t i
 	{
 		int i;
 		for (i = 0; i < set_key->key_length; i++)
-			printf("%02x", (unsigned char) set_key->key_data[i]);
-		printf("]\n\t");
+			DBG_PRINT("%02x", (unsigned char) set_key->key_data[i]);
+		DBG_PRINT("]\n\t");
 	}
-	printf("iv_data: [");
+	DBG_PRINT("iv_data: [");
 	{
 		int i;
 		for (i = 0; i < set_key->iv_length; i++)
-			printf("%02x", (unsigned char) set_key->iv_data[i]);
-		printf("]\n");
+			DBG_PRINT("%02x", (unsigned char) set_key->iv_data[i]);
+		DBG_PRINT("]\n\t");
 	}
+	DBG_PRINT("encrypt: %d\n", set_key->encrypt);
 
 	if ((fd = open("/dev/sendfile_aes", O_RDWR)) < 0) {
 		perror("open");
@@ -65,7 +74,7 @@ int sendfile_aes_open(char* key_data, size_t key_length, char* iv_data, size_t i
 	if (read(fd, buf, sizeof(buf)) < 0) {
 		perror ("read error");
 	}
-	printf("sendfile_aes read: %d\n", *((int*)buf));
+	DBG_PRINT("sendfile_aes read: %d\n", *((int*)buf));
 
 	return fd;
 }
@@ -78,14 +87,6 @@ int sendfile_aes_send(int fd, int out_fd, int in_fd, off_t *offset, size_t count
 	payload->in_fd = in_fd;
 	payload->offset = offset;
 	payload->count = count;
-
-	printf("enum: %ld, int: %ld, off_t*: %ld, size_t: %ld, SENDFILE_AES_SENDFILE:%ld\n",
-		sizeof(enum e_message_type),
-		sizeof(int),
-		sizeof(off_t*),
-		sizeof(size_t),
-		sizeof(message)
-		);
 
 	ret = write(fd, &message, sizeof(message));
 	if (ret < 0) {

@@ -9,20 +9,21 @@ enum e_message_type {
 };
 
 struct T_SENDFILE_AES_SET_KEY {
-	int key_length;
-	int iv_length;
-	char key_data[32];
-	char iv_data[16];
+	int key_length;		/* key length (bytes) */
+	int iv_length;		/* iv length (bytes) */
+	char key_data[32];	/* key */
+	char iv_data[16];	/* iv */
+	int encrypt;		/* 1=encrypt, 0=decrypt */
 };
 
-struct T_SENDFILE_AES_GET_KEY {
+struct T_SENDFILE_AES_GET_IV {
 };
 
 struct T_SENDFILE_AES_SENDFILE {
-	int out_fd;
-	int in_fd;
-	off_t *offset;
-	size_t count;
+	int out_fd;	/* fd to read from */
+	int in_fd;	/* fd to write to */
+	off_t *offset;	/* pointer to off_t where to start reading */
+	size_t count;	/* bytes to process */
 };
 
 

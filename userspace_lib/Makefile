@@ -7,7 +7,7 @@ LIBRARY=libsendfile_aes
 all: $(LIBRARY) cppcheck
 
 cppcheck:
-	if [ -x "`which cppcheck`" ]; then cppcheck $(SOURCES); fi
+	if [ -x "`which cppcheck`" ]; then cppcheck --enable=all -I ../include/ $(SOURCES); fi
 
 $(LIBRARY): $(OBJECTS) $(HEADERS)
 	$(AR) $(ARFLAGS) $@.a $(OBJECTS)

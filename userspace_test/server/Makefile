@@ -11,7 +11,7 @@ EXECUTABLE=server
 all: $(EXECUTABLE) cppcheck
 
 cppcheck:
-	if [ -x "`which cppcheck`" ]; then cppcheck $(SOURCES); fi
+	if [ -x "`which cppcheck`" ]; then cppcheck --enable=all -I ../../userspace_lib/ $(SOURCES); fi
 
 $(EXECUTABLE): $(OBJECTS) $(LIBPATHS)
 	$(CC) $(OBJECTS) -o $@ $(LINKFLAGS)

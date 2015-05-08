@@ -6,7 +6,7 @@
 
 #include "sendfile_aes.h"
 
-#define _DEBUG_
+//#define _DEBUG_
 
 #ifdef _DEBUG_
 #define DBG_PRINT(...) printk(__VA_ARGS__)
@@ -36,7 +36,7 @@ typedef struct aes_key_st AES_KEY;
 
 
 // TODO use cpuid
-//#define HAS_AESNI
+#define HAS_AESNI
 
 #ifdef HAS_AESNI
 #define AES_SET_ENCRYPT_KEY(...) aesni_set_encrypt_key(__VA_ARGS__)
@@ -212,10 +212,9 @@ static ssize_t do_sendfile_null_cipher(struct t_data *this, struct T_SENDFILE_AE
 			goto fput_in;
 	}
 	//retval = rw_verify_area(READ, in.file, &pos, count);
-	retval = count;
-	if (retval < 0)
-		goto fput_in;
-	count = retval;
+	//if (retval < 0)
+	//	goto fput_in;
+	//count = retval;
 
 	/*
 	 * Get output file, and verify that it is ok..
@@ -231,10 +230,9 @@ static ssize_t do_sendfile_null_cipher(struct t_data *this, struct T_SENDFILE_AE
 	out_inode = file_inode(out.file);
 	out_pos = out.file->f_pos;
 	//retval = rw_verify_area(WRITE, out.file, &out_pos, count);
-	retval = count;
-	if (retval < 0)
-		goto fput_out;
-	count = retval;
+	//if (retval < 0)
+	//	goto fput_out;
+	//count = retval;
 
 	if (!max)
 		max = min(in_inode->i_sb->s_maxbytes, out_inode->i_sb->s_maxbytes);

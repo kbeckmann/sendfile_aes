@@ -36,7 +36,7 @@ typedef struct aes_key_st AES_KEY;
 
 
 // TODO use cpuid
-#define HAS_AESNI
+//#define HAS_AESNI
 
 #ifdef HAS_AESNI
 #define AES_SET_ENCRYPT_KEY(...) aesni_set_encrypt_key(__VA_ARGS__)

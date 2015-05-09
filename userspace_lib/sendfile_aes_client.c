@@ -5,6 +5,7 @@
 #include <assert.h>
 
 #include "sendfile_aes.h"
+#include "sendfile_aes_client.h"
 
 //#define DEBUG
 #ifdef DEBUG
@@ -17,11 +18,11 @@ static char buf[200];
 
 int sendfile_aes_open(char* key_data, size_t key_length, char* iv_data, size_t iv_length, int encrypt)
 {
-	assert(key_length == 32);
-	assert(iv_length == 16);
-
 	int fd = -1;
 	SENDFILE_AES_BUILD_MESSAGE(SET_KEY, message, set_key);
+
+	assert(key_length == 32);
+	assert(iv_length == 16);
 
 	DBG_PRINT("sendfile_aes_open(%p, %ld, %p, %ld, %d)\n", key_data, key_length, iv_data, iv_length, encrypt);
 

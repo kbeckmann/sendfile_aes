@@ -16,5 +16,5 @@ $(PWD)/vpaes-x86_64.o:
 	$(CC) -c $(@:.o=.s) -o $@
 
 cppcheck:
-	cppcheck --enable=all -I ../include/ *.c
+	if [ -x "`which cppcheck`" ]; then cppcheck --enable=all -I ../include/ *.c; fi
 

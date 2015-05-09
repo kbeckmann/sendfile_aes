@@ -81,12 +81,14 @@ void aesni_cbc_encrypt(const unsigned char *in,
                        size_t length,
                        const AES_KEY *key, unsigned char *ivec, int enc);
 
-int OPENSSL_ia32cap_P[128];
-
+/* Used from assembly aesni_* */
+extern int OPENSSL_ia32cap_P[128];
+int OPENSSL_ia32cap_P[128] = {0};
 
 
 static int major;
 static int message_err = -1;
+static int message_ok = 0;
 static int num_open_files = 0;
 
 struct t_data {
@@ -104,7 +106,8 @@ static int file_read(struct file* file, loff_t *offset, unsigned char* data, uns
 	oldfs = get_fs();
 	set_fs(get_ds());
 
-	ret = vfs_read(file, data, size, offset);
+	/* The cast to a user pointer is valid due to the set_fs() */
+	ret = vfs_read(file, (void __user *)data, size, offset);
 
 	set_fs(oldfs);
 	return ret;
@@ -118,7 +121,8 @@ static int file_write(struct file* file, unsigned char* data, size_t size, loff_
 	oldfs = get_fs();
 	set_fs(get_ds());
 
-	ret = vfs_write(file, data, size, offset);
+	/* The cast to a user pointer is valid due to the set_fs() */
+	ret = vfs_write(file, (void __user *)data, size, offset);
 
 	set_fs(oldfs);
 	return ret;
@@ -193,6 +197,8 @@ static ssize_t do_sendfile_null_cipher(struct t_data *this, struct T_SENDFILE_AE
 	loff_t out_pos;
 	ssize_t retval;
 	int fl;
+
+	(void) OPENSSL_ia32cap_P;
 
 	/*
 	 * Get input file, and verify that it is ok..
@@ -343,6 +349,7 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this, struct T_SENDFILE_AE
 static ssize_t message_sendfile(struct t_data* this, const char __user *buff, size_t len)
 {
 	struct T_SENDFILE_AES_SENDFILE message;
+	ssize_t ret = 0;
 
 	if (len < sizeof(message)) {
 		DBG_PRINT(DEVICE_NAME " size mismatch %ld should be %ld\n",
@@ -365,7 +372,15 @@ static ssize_t message_sendfile(struct t_data* this, const char __user *buff, si
 
 	DBG_PRINT(DEVICE_NAME " message received (*offset=%ld)\n",
 		   *message.offset);
-	return do_sendfile_aes_encrypt(this, &message);
+
+	// TODO: Add support for null_cipher in message
+	if (1) {
+		ret = do_sendfile_aes_encrypt(this, &message);
+	} else {
+		ret = do_sendfile_null_cipher(this, &message);
+	}
+
+	return ret;
 }
 
 static ssize_t device_write(struct file *file, const char __user *buff, size_t len, loff_t *off)
@@ -430,8 +445,8 @@ static int device_open(struct inode *inode, struct file *file)
 		struct t_data* data = (struct t_data*) kmalloc(sizeof(struct t_data), GFP_KERNEL);
 
 		DBG_PRINT(DEVICE_NAME " private_data: %p\n", file->private_data);
-		data->key = 0;
-		data->message = 0;
+		data->key = NULL;
+		data->message = message_ok;
 		file->private_data = data;
 
 		num_open_files++;
@@ -449,11 +464,11 @@ static int device_release(struct inode *inode, struct file *file)
 			if (this->key) {
 				DBG_PRINT(DEVICE_NAME " freeing this->key: %p\n", this->key);
 				kfree(this->key);
-				this->key = 0;
+				this->key = NULL;
 			}
 			DBG_PRINT(DEVICE_NAME " freeing this\n");
 			kfree(file->private_data);
-			file->private_data = 0;
+			file->private_data = NULL;
 		}
 	}
 	num_open_files--;
@@ -478,7 +493,7 @@ static int __init sendfile_aes_init(void)
 		return major;
 	}
 	DBG_PRINT("sendfile_aes: assigned major: %d\n", major);
-	DBG_PRINT("create node with mknod /dev/sendfile_aes c %d 0\n", major);
+	printk(DEVICE_NAME " create a node with mknod /dev/sendfile_aes c %d 0\n", major);
 	return 0;
 }
 

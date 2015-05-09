@@ -8,10 +8,11 @@ SOURCES=$(wildcard *.c)
 OBJECTS=$(SOURCES:.c=.o)
 EXECUTABLE=basic
 
-all: $(EXECUTABLE) cppcheck
+all: check $(EXECUTABLE)
 
-cppcheck:
-	if [ -x "`which cppcheck`" ]; then cppcheck --enable=all -I ../../userspace_lib/ $(SOURCES); fi
+check:
+	@if [ -x "`which cppcheck 2> /dev/null`" ]; then cppcheck --enable=all -I ../../userspace_lib/ $(SOURCES); fi
+	@if [ -x "`which sparse 2> /dev/null`" ]; then sparse -I ../../userspace_lib/ -Wsparse-all $(SOURCES); fi
 
 $(EXECUTABLE): $(OBJECTS) $(LIBPATHS)
 	$(CC) $(OBJECTS) -o $@ $(LINKFLAGS)

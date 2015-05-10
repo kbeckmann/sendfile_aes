@@ -11,7 +11,7 @@
 
 static int delay_seconds = 0; // TODO: add argument
 
-void do_delay()
+static void do_delay(void)
 {
 	if (delay_seconds > 0)
 		sleep(delay_seconds);
@@ -26,7 +26,7 @@ static void die (const char * format, ...)
     exit (1);
 }
 
-int print_help(int argc, char **argv)
+static int print_help(int argc, char **argv)
 {
 	(void) argc;
 	printf("Usage: %s <in_file> <out_file> [key [encrypt]]\n"
@@ -36,17 +36,20 @@ int print_help(int argc, char **argv)
 	return -1;
 }
 
-int do_sendfile(char *filename_out, char *filename_in)
+static int do_sendfile(char *filename_out, char *filename_in)
 {
-	int in_fd = open(filename_in, O_RDONLY);
+	struct stat stat_buf;
+	off_t offset = 0;
+	int in_fd;
+	int out_fd;
+
+	in_fd = open(filename_in, O_RDONLY);
 	if (in_fd < 0) die("Can't open file: %s", filename_in);
 
-	int out_fd = open(filename_out, O_WRONLY | O_CREAT, 0644);
+	out_fd = open(filename_out, O_WRONLY | O_CREAT, 0644);
 	if (out_fd < 0) die("Can't open file: %s", filename_in);
 
-	struct stat stat_buf;
 	fstat(in_fd, &stat_buf);
-	off_t offset = 0;
 	sendfile(out_fd, in_fd, &offset, stat_buf.st_size);
 	do_delay();
 
@@ -56,24 +59,28 @@ int do_sendfile(char *filename_out, char *filename_in)
 	return 0;
 }
 
-int do_sendfile_aes(char *key, char *filename_out, char *filename_in, int encrypt)
+static int do_sendfile_aes(char *filename_out, char *filename_in, int encrypt)
 {
-	char override_key[32] = "\x42\x93\x20\x9e\x7a\x46\x38\xbe\x35\xc2\xc2\x91\x53\x3a\x3c\x0b\xe4\x86\x7b\x6b\xd7\x66\x98\x04\x58\xc0\x2b\x3b\x02\x9e\x7d\xf6";
-	key = override_key;
-	char iv[16] = "\x09\xca\xa1\x9c\x39\x40\x62\x0b\x6b\x97\xa5\x0a\x7e\x2a\x97\x1d";
+	struct stat stat_buf;
+	off_t offset = 0;
+	int in_fd;
+	int out_fd;
+	int handle;
 
-	int handle = sendfile_aes_open(key, 32, iv, sizeof(iv), encrypt);
+	// Hard-coded keys for test purpose
+	char key[] = "\x42\x93\x20\x9e\x7a\x46\x38\xbe\x35\xc2\xc2\x91\x53\x3a\x3c\x0b\xe4\x86\x7b\x6b\xd7\x66\x98\x04\x58\xc0\x2b\x3b\x02\x9e\x7d\xf6";
+	char iv[] = "\x09\xca\xa1\x9c\x39\x40\x62\x0b\x6b\x97\xa5\x0a\x7e\x2a\x97\x1d";
+
+	handle = sendfile_aes_open(key, sizeof(key) - 1, iv, sizeof(iv) - 1, encrypt);
 	do_delay();
 
-	int in_fd = open(filename_in, O_RDONLY);
+	in_fd = open(filename_in, O_RDONLY);
 	if (in_fd < 0) die("Can't open file: %s", filename_in);
 
-	int out_fd = open(filename_out, O_WRONLY | O_CREAT, 0644);
+	out_fd = open(filename_out, O_WRONLY | O_CREAT, 0644);
 	if (out_fd < 0) die("Can't open file: %s", filename_in);
 
-	struct stat stat_buf;
 	fstat(in_fd, &stat_buf);
-	off_t offset = 0;
 	sendfile_aes_send(handle, out_fd, in_fd, &offset, stat_buf.st_size);
 	do_delay();
 
@@ -88,7 +95,6 @@ int main(int argc, char **argv)
 {
 	char *filename_in = argv[1];
 	char *filename_out = argv[2];
-	char *key = argv[3];
 	int encrypt = 1;
 
 	switch (argc) {
@@ -97,7 +103,7 @@ int main(int argc, char **argv)
 	case 5:
 		encrypt = argv[4][0] == '1' ? 1 : 0;
 	case 4:
-		return do_sendfile_aes(key, filename_out, filename_in, encrypt);
+		return do_sendfile_aes(filename_out, filename_in, encrypt);
 	default:
 		return print_help(argc, argv);
 	}

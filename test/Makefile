@@ -1,8 +1,8 @@
-.PHONY: all
+.PHONY: all setup verify bench clean
 
-all: setup verify bench
+all: clean setup verify bench
 
-setup: clean
+setup:
 	@$(BASH) ./setup.sh
 
 verify:

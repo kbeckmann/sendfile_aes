@@ -80,8 +80,25 @@ void aesni_cbc_encrypt(const unsigned char *in,
                        const AES_KEY *key, unsigned char *ivec, int enc);
 
 /* Used from assembly aesni_* */
-extern int OPENSSL_ia32cap_P[8];
-int OPENSSL_ia32cap_P[8] = {0};
+extern unsigned int OPENSSL_ia32cap_P[4];
+unsigned int OPENSSL_ia32cap_P[4] = {0};
+
+#define VPAES_ASM
+#define BSAES_ASM
+#define AESNI_ASM
+
+
+#  ifdef VPAES_ASM
+#   define VPAES_CAPABLE   (OPENSSL_ia32cap_P[1]&(1<<(41-32)))
+#  endif
+#  ifdef BSAES_ASM
+#   define BSAES_CAPABLE   (OPENSSL_ia32cap_P[1]&(1<<(41-32)))
+#  endif
+/*
+ * AES-NI section
+ */
+#  define AESNI_CAPABLE   (OPENSSL_ia32cap_P[1]&(1<<(57-32)))
+
 
 
 
@@ -132,6 +149,10 @@ int main(int argc, char **argv)
 	dump("cpuid", OPENSSL_ia32cap_P, sizeof(OPENSSL_ia32cap_P));
 	OPENSSL_cpuid_setup();
 	dump("cpuid", OPENSSL_ia32cap_P, sizeof(OPENSSL_ia32cap_P));
+
+	printf("VPAES_CAPABLE: %d\n", VPAES_CAPABLE);
+	printf("BSAES_CAPABLE: %d\n", BSAES_CAPABLE);
+	printf("AESNI_CAPABLE: %d\n", AESNI_CAPABLE);
 
 	if (encrypt) {
 		AES_SET_ENCRYPT_KEY(key, (sizeof(key) - 1) * 8, &aes_key);

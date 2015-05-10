@@ -3,7 +3,9 @@ KERNEL_INCLUDE_PATH = /lib/modules/$(shell uname -r)/build/arch/$(ARCH)/include
 obj-m += sendfile_aes_package.o
 sendfile_aes_package-objs += sendfile_aes.o aesni-x86_64.o vpaes-x86_64.o
 
-all: check modules
+all: modules
+
+check_and_build: check all
 
 check:
 	@if [ -x "`which cppcheck 2> /dev/null`" ]; then cppcheck --enable=all -I $(KERNEL_INCLUDE_PATH) *.c; fi

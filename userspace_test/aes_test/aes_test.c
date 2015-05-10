@@ -17,11 +17,22 @@
 
 #define AES_BLOCK_SIZE 16
 
+static void dump(char *prefix, unsigned char *buf, int size)
+{
+	int i = 0;
+	printf("%s: [", prefix);
+	while (size--) {
+		if (i++ % 16 == 0) printf("\n ");
+		printf("%02x", *buf++);
+	}
+	printf("]\n");
+}
+
 /**
  * Create an 256 bit key and IV using the supplied key_data. salt can be added for taste.
  * Fills in the encryption and decryption ctx objects and returns 0 on success
  **/
-int aes_init(unsigned char *key_data, int key_data_len, unsigned char *salt, EVP_CIPHER_CTX *e_ctx,
+static int aes_init(unsigned char *key_data, int key_data_len, unsigned char *salt, EVP_CIPHER_CTX *e_ctx,
 			 EVP_CIPHER_CTX *d_ctx)
 {
 	int i, nrounds = 100;
@@ -38,20 +49,8 @@ int aes_init(unsigned char *key_data, int key_data_len, unsigned char *salt, EVP
 		return -1;
 	}
 
-	{
-		size_t i;
-		printf("key: [");
-		for (i = 0; i < sizeof(key); i++)
-			printf("%02x", key[i]);
-		printf("]\n");
-	}
-	{
-		size_t i;
-		printf("iv: [");
-		for (i = 0; i < sizeof(iv); i++)
-			printf("%02x", iv[i]);
-		printf("]\n");
-	}
+	dump("key", key, sizeof(key));
+	dump("iv", iv, sizeof(iv));
 
 	EVP_CIPHER_CTX_init(e_ctx);
 	EVP_EncryptInit_ex(e_ctx, EVP_aes_256_cbc(), NULL, key, iv);
@@ -65,7 +64,7 @@ int aes_init(unsigned char *key_data, int key_data_len, unsigned char *salt, EVP
  * Encrypt *len bytes of data
  * All data going in & out is considered binary (unsigned char[])
  */
-unsigned char *aes_encrypt(EVP_CIPHER_CTX *e, unsigned char *plaintext, int *len)
+static unsigned char *aes_encrypt(EVP_CIPHER_CTX *e, unsigned char *plaintext, int *len)
 {
 	/* max ciphertext len for a n bytes of plaintext is n + AES_BLOCK_SIZE -1 bytes */
 	int c_len = *len + AES_BLOCK_SIZE, f_len = 0;
@@ -88,7 +87,7 @@ unsigned char *aes_encrypt(EVP_CIPHER_CTX *e, unsigned char *plaintext, int *len
 /*
  * Decrypt *len bytes of ciphertext
  */
-unsigned char *aes_decrypt(EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *len)
+static unsigned char *aes_decrypt(EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *len)
 {
 	/* plaintext will always be equal to or lesser than length of ciphertext*/
 	int p_len = *len, f_len = 0;
@@ -102,20 +101,8 @@ unsigned char *aes_decrypt(EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *le
 	return plaintext;
 }
 
-void dump(unsigned char *buf, int size)
-{
-	printf("Dump: [");
-	int i = 0;
-	while (size--) {
-		if (i++ % 16 == 0) printf("\n ");
-		printf("%02x", *buf++);
-	}
-	printf("]\n");
-}
-
 int main(int argc, char **argv)
 {
-	(void) argc;
 	/* "opaque" encryption, decryption ctx structures that libcrypto uses to record
      status of enc/dec operations */
 	EVP_CIPHER_CTX en, de;
@@ -124,8 +111,6 @@ int main(int argc, char **argv)
      compiled in salt. We just read the bit pattern created by these two 4 byte
      integers on the stack as 64 bits of contigous salt material -
      ofcourse this only works if sizeof(int) >= 4 */
-//	unsigned int salt[] = {12345, 54321};
-//	unsigned char salt[] = "\0\0\0\0\0\0\0\0";
 	unsigned char salt[] = "AAAAAAAA";
 	unsigned char *key_data;
 	int key_data_len, i;
@@ -135,8 +120,8 @@ int main(int argc, char **argv)
 					 "abcd", "this is a test", "this is a bigger test",
 					 "\nWho are you ?\nI am the 'Doctor'.\n'Doctor' who ?\nPrecisely!",*/
 					 NULL};
+	(void) argc;
 
-//	input[0][1] = '\n';
 
 	/* the key_data is read from the argument list */
 	key_data = (unsigned char *)argv[1];
@@ -162,11 +147,11 @@ int main(int argc, char **argv)
 
 		ciphertext = aes_encrypt(&en, (unsigned char *)input[i], &len);
 
-		dump(ciphertext, len);
+		dump("ciphertext", ciphertext, len);
 
 		plaintext = aes_decrypt(&de, ciphertext, &len);
 
-		dump(plaintext, len);
+		dump("plaintext", plaintext, len);
 
 		if (strncmp((char *)plaintext, input[i], olen))
 			printf("FAIL: enc/dec failed for \"%s\"\n", input[i]);

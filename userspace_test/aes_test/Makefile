@@ -1,7 +1,7 @@
 CC=gcc
 CFLAGS+=-g -Wall -Wextra -std=c99 -I../../userspace_lib
 
-LINKFLAGS = -static -lcrypto -ldl -lz -static-libgcc
+LINKFLAGS = -lcrypto
 
 SOURCES=$(wildcard *.c)
 OBJECTS=$(SOURCES:.c=.o)

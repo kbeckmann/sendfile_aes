@@ -42,7 +42,7 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 #include "sendfile_aes_client.h"
 
-long time_us()
+static long time_us(void)
 {
 	long ret;
 	struct timeval tv;
@@ -67,6 +67,11 @@ int main(int argc, char **argv)
 	int sendfile_aes_handle;	/* holds the handle to our fancy sendfile_aes */
 	long t0;
 
+	/* initiate the sendfile_aes session with hard-coded key */
+	char key[] = "\x42\x93\x20\x9e\x7a\x46\x38\xbe\x35\xc2\xc2\x91\x53\x3a\x3c\x0b\xe4\x86\x7b\x6b\xd7\x66\x98\x04\x58\xc0\x2b\x3b\x02\x9e\x7d\xf6";
+	char iv[] = "\x09\xca\xa1\x9c\x39\x40\x62\x0b\x6b\x97\xa5\x0a\x7e\x2a\x97\x1d";
+
+
 	/* check command line arguments, handling an optional port number */
 	if (argc == 2) {
 		port = atoi(argv[1]);
@@ -86,11 +91,7 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
-	/* initiate the sendfile_aes session with hard-coded key */
-	char key[32] = "\x42\x93\x20\x9e\x7a\x46\x38\xbe\x35\xc2\xc2\x91\x53\x3a\x3c\x0b\xe4\x86\x7b\x6b\xd7\x66\x98\x04\x58\xc0\x2b\x3b\x02\x9e\x7d\xf6";
-	char iv[16] = "\x09\xca\xa1\x9c\x39\x40\x62\x0b\x6b\x97\xa5\x0a\x7e\x2a\x97\x1d";
-
-	sendfile_aes_handle = sendfile_aes_open(key, sizeof(key), iv, sizeof(iv), 1);
+	sendfile_aes_handle = sendfile_aes_open(key, sizeof(key) - 1, iv, sizeof(iv) - 1, 1);
 	if (sendfile_aes_handle < 0) {
 		fprintf(stderr, "unable to call sendfile_aes_open: %s\n",
 			strerror(errno));
@@ -173,7 +174,7 @@ int main(int argc, char **argv)
 			exit(1);
 		}
 		if (rc != stat_buf.st_size) {
-			fprintf(stderr, 
+			fprintf(stderr,
 				"incomplete transfer from sendfile: %d of %d bytes\n",
 				rc, (int)stat_buf.st_size);
 			exit(1);
@@ -184,7 +185,7 @@ int main(int argc, char **argv)
 
 		/* close socket descriptor */
 		close(desc);
-		
+
 		fprintf(stdout, "took: %ldus\n", (time_us() - t0));
 		fflush(stdout);
 	}

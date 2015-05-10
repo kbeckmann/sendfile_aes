@@ -4,7 +4,8 @@ CFLAGS+=-g -Wall -Wextra -std=c99
 LINKFLAGS =
 
 SOURCES=$(wildcard *.c)
-OBJECTS=$(SOURCES:.c=.o) $(wildcard *.s)
+ASM=$(wildcard *.s)
+OBJECTS=$(SOURCES:.c=.o)
 EXECUTABLE=openssl_test
 
 all: check $(EXECUTABLE)
@@ -14,7 +15,7 @@ check:
 	@if [ -x "`which sparse 2> /dev/null`" ]; then sparse -I ../../userspace_lib/ -Wsparse-all $(SOURCES); fi
 
 $(EXECUTABLE): $(OBJECTS) $(LIBPATHS)
-	$(CC) $(OBJECTS) -o $@ $(LINKFLAGS)
+	$(CC) $(OBJECTS) $(ASM) -o $@ $(LINKFLAGS)
 
 .o:
 	$(CC) $(CFLAGS) $< -o $@

@@ -80,8 +80,8 @@ void aesni_cbc_encrypt(const unsigned char *in,
                        const AES_KEY *key, unsigned char *ivec, int enc);
 
 /* Used from assembly aesni_* */
-extern int OPENSSL_ia32cap_P[128];
-int OPENSSL_ia32cap_P[128] = {0};
+extern int OPENSSL_ia32cap_P[8];
+int OPENSSL_ia32cap_P[8] = {0};
 
 
 
@@ -94,6 +94,22 @@ static void dump(char *prefix, unsigned char *buf, int size)
 		printf("%02x", *buf++);
 	}
 	printf("]\n");
+}
+
+void OPENSSL_cpuid_setup(void)
+{
+	unsigned long long vec;
+	unsigned long long OPENSSL_ia32_cpuid(unsigned int *);
+
+	vec = OPENSSL_ia32_cpuid(OPENSSL_ia32cap_P);
+
+    /*
+     * |(1<<10) sets a reserved bit to signal that variable
+     * was initialized already... This is to avoid interference
+     * with cpuid snippets in ELF .init segment.
+     */
+    OPENSSL_ia32cap_P[0] = (unsigned int)vec | (1 << 10);
+    OPENSSL_ia32cap_P[1] = (unsigned int)(vec >> 32);
 }
 
 int main(int argc, char **argv)
@@ -113,6 +129,9 @@ int main(int argc, char **argv)
 
 	(void) argc;
 
+	dump("cpuid", OPENSSL_ia32cap_P, sizeof(OPENSSL_ia32cap_P));
+	OPENSSL_cpuid_setup();
+	dump("cpuid", OPENSSL_ia32cap_P, sizeof(OPENSSL_ia32cap_P));
 
 	if (encrypt) {
 		AES_SET_ENCRYPT_KEY(key, (sizeof(key) - 1) * 8, &aes_key);

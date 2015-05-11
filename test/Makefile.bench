@@ -1,0 +1,57 @@
+BINARIES=$(wildcard rand.*.bin) $(wildcard zero.*.bin) A.bin
+BINARIES_ENC=$(BINARIES:.bin=.bin-enc)
+BINARIES_OPENSSL=$(BINARIES:.bin=.bin-openssl)
+BINARIES_NULL_ENC=$(BINARIES:.bin=.bin-null-enc)
+BINARIES_NULL_OPENSSL=$(BINARIES:.bin=.bin-null-openssl)
+CORES=12
+
+all: single_process full_gas full_gas_null
+	@echo Benchmark done
+
+single_process:
+	@echo Performance 135MB sendfile_aes:
+	@perf stat -r 100 -B  ./test_basic_devnull.sh zero.135.bin
+	@echo Performance 135MB openssl:
+	@perf stat -r 100 -B  ./test_openssl_devnull.sh zero.135.bin
+
+full_gas:
+	@echo Full gas!
+	rm -f *.enc *.openssl
+	sync
+	@perf stat -r 1 -B $(MAKE) -s -j$(CORES) -f Makefile.bench full_gas_basic
+	@perf stat -r 1 -B $(MAKE) -s -j$(CORES) -f Makefile.bench full_gas_openssl
+
+full_gas_null:
+	@echo Full gas > /dev/null
+	@perf stat -r 10 -B $(MAKE) -s -j$(CORES) -f Makefile.bench full_gas_null_basic
+	@perf stat -r 10 -B $(MAKE) -s -j$(CORES) -f Makefile.bench full_gas_null_openssl
+
+
+
+
+# tests that pipe the output to actual files
+full_gas_basic: $(BINARIES_ENC)
+	sync
+
+full_gas_openssl: $(BINARIES_OPENSSL)
+	sync
+
+$(BINARIES_ENC):
+	@./test_basic.sh $(@:.bin-enc=.bin)
+
+$(BINARIES_OPENSSL):
+	@./test_openssl.sh $(@:.bin-openssl=.bin)
+	
+
+
+# tests that pipe the output to /dev/null:
+full_gas_null_basic: $(BINARIES_NULL_ENC)
+
+full_gas_null_openssl: $(BINARIES_NULL_OPENSSL)
+
+$(BINARIES_NULL_ENC):
+	@./test_basic_devnull.sh $(@:.bin-null-enc=.bin)
+
+$(BINARIES_NULL_OPENSSL):
+	@./test_openssl_devnull.sh $(@:.bin-null-openssl=.bin)
+	

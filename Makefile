@@ -23,7 +23,7 @@ install_module:
 
 # sendfile_aes_package.ko must be loaded and installed in /dev/sendfile_aes
 test:
-	lsmod | grep sendfile_aes_package &> /dev/null || (echo "Run 'sudo make install_module' first" && false)
+	@lsmod | grep sendfile_aes_package &> /dev/null || (echo "Run 'sudo make install_module' first" && false)
 	$(MAKE) -C test
 
 clean:

@@ -1,0 +1,19 @@
+BINARIES=$(wildcard rand.*.bin) A.bin
+BINARIES_ENC=$(BINARIES:.bin=.bin.enc)
+BINARIES_OPENSSL=$(BINARIES:.bin=.bin.openssl)
+
+all: clean verify
+
+clean:
+	@rm -f *.enc *.openssl
+	@sync
+
+verify: $(BINARIES_ENC)
+	@echo Test done.
+
+$(BINARIES_ENC):
+	$(eval ORIG=$(@:.enc=))
+	@$(SHELL) test_basic.sh $(ORIG) || echo oh basic crashed
+	@$(SHELL) test_openssl.sh $(ORIG) || echo oh no, openssl crashed
+	@(diff $(ORIG).enc $(ORIG).openssl > /dev/null) || (/bin/echo -e "\n    ERROR: $(ORIG) differ\n")
+	

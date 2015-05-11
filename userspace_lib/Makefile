@@ -17,7 +17,7 @@ $(LIBRARY): $(OBJECTS) $(HEADERS)
 	$(CC) $(CFLAGS) $< -o $@
 
 clean:
-	rm -f $(EXECUTABLE) $(OBJECTS)
+	rm -f $(LIBRARY).a $(OBJECTS)
 
 depend: .depend
 

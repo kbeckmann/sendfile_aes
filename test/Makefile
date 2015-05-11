@@ -1,15 +1,17 @@
 .PHONY: all setup verify bench clean
+CORES=12
 
-all: clean setup verify bench
+all: clean setup verify
 
 setup:
 	@$(BASH) ./setup.sh
 
 verify:
-	@$(BASH) ./verify.sh
+	@echo Starting verification
+	$(MAKE) -s -j$(CORES) -f Makefile.verify
 
 bench:
-	@$(BASH) ./bench.sh
+	$(MAKE) -s -f Makefile.bench
 
 clean:
 	@$(BASH) ./clean.sh

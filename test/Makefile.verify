@@ -13,7 +13,7 @@ verify: $(BINARIES_ENC)
 
 $(BINARIES_ENC):
 	$(eval ORIG=$(@:.enc=))
-	@$(SHELL) test_basic.sh $(ORIG) || echo oh basic crashed
-	@$(SHELL) test_openssl.sh $(ORIG) || echo oh no, openssl crashed
+	@$(SHELL) test_basic.sh $(ORIG)
+	@$(SHELL) test_openssl.sh $(ORIG)
 	@(diff $(ORIG).enc $(ORIG).openssl > /dev/null) || (/bin/echo -e "\n    ERROR: $(ORIG) differ\n")
-	
+

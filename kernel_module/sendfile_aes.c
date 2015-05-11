@@ -9,13 +9,28 @@
 
 //#define _DEBUG_
 
-#ifdef _DEBUG_
 #define DBG_PRINT(...) printk(__VA_ARGS__)
-#define DBG_PRINT_HEX(...) print_hex_dump(__VA_ARGS__)
-#else
-#define DBG_PRINT(...)
-#define DBG_PRINT_HEX(...)
+
+#define LOGLEVEL 1
+
+#if LOGLEVEL == 0
+#  define INF_HEX(...)
+#  define INF(...) 
+#  define DBG(...)
+#  define ERR(...) DBG_PRINT(__VA_ARGS__)
+#elif LOGLEVEL == 1
+#  define INF_HEX(...)
+#  define INF(...) 
+#  define DBG(...) DBG_PRINT(__VA_ARGS__)
+#  define ERR(...) DBG_PRINT(__VA_ARGS__)
+#elif LOGLEVEL == 2
+#  define INF_HEX(...) print_hex_dump(__VA_ARGS__)
+#  define INF(...) DBG_PRINT(__VA_ARGS__) 
+#  define DBG(...) DBG_PRINT(__VA_ARGS__)
+#  define ERR(...) DBG_PRINT(__VA_ARGS__)
 #endif
+
+
 #define DEVICE_NAME "sendfile_aes"
 
 #define CHUNK_SIZE 1024 * 10
@@ -68,13 +83,13 @@ static ssize_t device_read(struct file *file, char __user *buffer, size_t len, l
 	struct t_data* this;
 
 	if (!(file && file->private_data)) {
-		DBG_PRINT(DEVICE_NAME " unexpected call to read()\n");
+		INF(DEVICE_NAME " unexpected call to read()\n");
 		return simple_read_from_buffer(buffer, len, offset,
 			&message_err, sizeof(message_err));
 	}
 
 	this = (struct t_data*)file->private_data;
-	DBG_PRINT(DEVICE_NAME " read(%d)\n", this->message);
+	INF(DEVICE_NAME " read(%d)\n", this->message);
 	return simple_read_from_buffer(buffer, len, offset,
 		&this->message, sizeof(this->message));
 }
@@ -84,12 +99,12 @@ static ssize_t message_set_key(struct t_data* this, const char __user *buff, siz
 	struct T_SENDFILE_AES_SET_KEY set_key;
 
 	if (len < sizeof(set_key)) {
-		DBG_PRINT(DEVICE_NAME " write(): message too short (1)\n");
+		ERR(DEVICE_NAME " write(): message too short\n");
 		return -1;
 	}
 
 	if (len > 4096 + sizeof(set_key)) {
-		DBG_PRINT(DEVICE_NAME " write(): message too long\n");
+		ERR(DEVICE_NAME " write(): message too long\n");
 		return -1;
 	}
 
@@ -97,15 +112,15 @@ static ssize_t message_set_key(struct t_data* this, const char __user *buff, siz
 	copy_from_user(this->key, buff, len);
 
 	if (len > this->key->key_length + 31) {
-		DBG_PRINT(DEVICE_NAME " write(): key_length != len; %d != %ld\n",
+		ERR(DEVICE_NAME " write(): key_length != len; %d != %ld\n",
 			this->key->key_length,
 			len);
 		return -1;
 	}
 
-	DBG_PRINT_HEX(KERN_ERR, " key: ", DUMP_PREFIX_NONE, 16, 1,
+	INF_HEX(KERN_ERR, " key: ", DUMP_PREFIX_NONE, 16, 1,
 				  this->key->key_data, this->key->key_length, 1);
-	DBG_PRINT_HEX(KERN_ERR, " iv : ", DUMP_PREFIX_NONE, 16, 1,
+	INF_HEX(KERN_ERR, " iv : ", DUMP_PREFIX_NONE, 16, 1,
 				  this->key->iv_data, this->key->iv_length, 1);
 
 	if (this->key->encrypt) {
@@ -232,7 +247,7 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this, struct T_SENDFILE_AE
 	loff_t in_off = 0;
 	loff_t out_off = 0;
 
-	DBG_PRINT(DEVICE_NAME " do_sendfile_aes_encrypt:\n\t"
+	INF(DEVICE_NAME " do_sendfile_aes_encrypt:\n\t"
 		"out_fd: %d\n\t"
 		"in_fd: %d\n\t"
 		"count: %ld\n\t"
@@ -259,18 +274,18 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this, struct T_SENDFILE_AE
 			memcpy(pad, this->tmp_buf + n2, n_trailing);
 			memset(pad + n_trailing, zero_padding, zero_padding);
 			aes_auto_cbc_encrypt(pad, this->dst_buf + n2, sizeof(pad), &this->aes_key, this->key->iv_data, this->key->encrypt);
-			DBG_PRINT(DEVICE_NAME " PAD! Wrote %d extra bytes\n", n_trailing);
+			INF(DEVICE_NAME " PAD! Wrote %d extra bytes\n", n_trailing);
 			n = n2 + sizeof(pad);
 		}
 
 		*dst_len = n;
-		DBG_PRINT(DEVICE_NAME " n= %ld, n2=%d, n_trailing=%d\n", n, n2, n_trailing);
+		INF(DEVICE_NAME " n= %ld, n2=%d, n_trailing=%d\n", n, n2, n_trailing);
 		// write to out_fd
 		file_write(file_out, this->dst_buf, n, &out_off);
 	}
-	DBG_PRINT(DEVICE_NAME " (after loop) n= %ld\n", n);
+	INF(DEVICE_NAME " (after loop) n= %ld\n", n);
 	this->message = message->count;
-	DBG_PRINT(DEVICE_NAME " message: %d\n", this->message);
+	INF(DEVICE_NAME " message: %d\n", this->message);
 
 	// clean up temp buffers so we don't leave plaintext in RAM
 	memset(this->tmp_buf, 0, sizeof(this->tmp_buf));
@@ -284,14 +299,14 @@ static ssize_t message_sendfile(struct t_data* this, const char __user *buff, si
 	ssize_t ret = 0;
 
 	if (len < sizeof(message)) {
-		DBG_PRINT(DEVICE_NAME " size mismatch %ld should be %ld\n",
+		INF(DEVICE_NAME " size mismatch %ld should be %ld\n",
 			   len, sizeof(message));
 		this->message = -1;
 		return -1;
 	}
 
 	copy_from_user(&message, buff, sizeof(message));
-	DBG_PRINT(DEVICE_NAME " message received (%d, %d, %p, %ld)\n",
+	INF(DEVICE_NAME " message received (%d, %d, %p, %ld)\n",
 		   message.out_fd,
 		   message.in_fd,
 		   message.offset,
@@ -302,7 +317,7 @@ static ssize_t message_sendfile(struct t_data* this, const char __user *buff, si
 		return -1;
 	}
 
-	DBG_PRINT(DEVICE_NAME " message received (*offset=%ld)\n",
+	INF(DEVICE_NAME " message received (*offset=%ld)\n",
 		   *message.offset);
 
 	// TODO: Add support for null_cipher in message
@@ -321,24 +336,24 @@ static ssize_t device_write(struct file *file, const char __user *buff, size_t l
 	enum e_message_type message_type;
 
 	if (!(file && file->private_data)) {
-		DBG_PRINT(DEVICE_NAME " write(): invalid stuff\n");
+		ERR(DEVICE_NAME " write(): invalid stuff\n");
 		return -1;
 	}
 	this = (struct t_data*)file->private_data;
 
 	if (!off) {
-		DBG_PRINT(DEVICE_NAME " write() warning: off is null\n");
+		ERR(DEVICE_NAME " write() warning: off is null\n");
 	} else {
-		DBG_PRINT(DEVICE_NAME " write() *off: %lld\n", *off);
+		INF(DEVICE_NAME " write() *off: %lld\n", *off);
 	}
 
 	if (len < sizeof(enum e_message_type)) {
-		DBG_PRINT(DEVICE_NAME " write(): message too short\n");
+		ERR(DEVICE_NAME " write(): message too short\n");
 		return -1;
 	}
 
 	if (!buff) {
-		DBG_PRINT(DEVICE_NAME " write(): buff is NULL\n");
+		ERR(DEVICE_NAME " write(): buff is NULL\n");
 		return -1;
 	}
 
@@ -355,7 +370,7 @@ static ssize_t device_write(struct file *file, const char __user *buff, size_t l
 	buff += sizeof(message_type);
 	len -= sizeof(message_type);
 
-	DBG_PRINT(DEVICE_NAME " write(): message_type: %d\n", message_type);
+	INF(DEVICE_NAME " write(): message_type: %d\n", message_type);
 	switch (message_type) {
 		case MESSAGE_TYPE_SET_KEY:
 			return message_set_key(this, buff, len);
@@ -364,7 +379,7 @@ static ssize_t device_write(struct file *file, const char __user *buff, size_t l
 		case MESSAGE_TYPE_SENDFILE:
 			return message_sendfile(this, buff, len);
 		default:
-			DBG_PRINT(DEVICE_NAME " write() invalid message_type\n");
+			ERR(DEVICE_NAME " write() invalid message_type\n");
 	}
 
 	return -1;
@@ -372,17 +387,17 @@ static ssize_t device_write(struct file *file, const char __user *buff, size_t l
 
 static int device_open(struct inode *inode, struct file *file)
 {
-	DBG_PRINT(DEVICE_NAME " open\n");
+	INF(DEVICE_NAME " open\n");
 	if (likely(file)) {
 		struct t_data* data = (struct t_data*) kmalloc(sizeof(struct t_data), GFP_KERNEL);
 
-		DBG_PRINT(DEVICE_NAME " private_data: %p\n", file->private_data);
+		INF(DEVICE_NAME " private_data: %p\n", file->private_data);
 		data->key = NULL;
 		data->message = message_ok;
 		file->private_data = data;
 
 		num_open_files++;
-		DBG_PRINT(DEVICE_NAME " open files: %d\n", num_open_files);
+		DBG(DEVICE_NAME " open, open files: %d\n", num_open_files);
 	}
 	return 0;
 }
@@ -390,22 +405,21 @@ static int device_open(struct inode *inode, struct file *file)
 static int device_release(struct inode *inode, struct file *file)
 {
 	if (likely(file)) {
-		DBG_PRINT(DEVICE_NAME " private_data: %p\n", file->private_data);
+		INF(DEVICE_NAME " private_data: %p\n", file->private_data);
 		if (file->private_data) {
 			struct t_data* this = (struct t_data*)file->private_data;
 			if (this->key) {
-				DBG_PRINT(DEVICE_NAME " freeing this->key: %p\n", this->key);
+				INF(DEVICE_NAME " freeing this->key: %p\n", this->key);
 				kfree(this->key);
 				this->key = NULL;
 			}
-			DBG_PRINT(DEVICE_NAME " freeing this\n");
+			INF(DEVICE_NAME " freeing this\n");
 			kfree(file->private_data);
 			file->private_data = NULL;
 		}
 	}
 	num_open_files--;
-	DBG_PRINT(DEVICE_NAME " release\n");
-	DBG_PRINT(DEVICE_NAME " open files: %d\n", num_open_files);
+	DBG(DEVICE_NAME " release, open files: %d\n", num_open_files);
 	return 0;
 }
 
@@ -418,14 +432,14 @@ static struct file_operations fops = {
 
 static int __init sendfile_aes_init(void)
 {
-	DBG_PRINT(DEVICE_NAME " init\n");
+	INF(DEVICE_NAME " init\n");
 	major = register_chrdev(0, DEVICE_NAME, &fops);
 	if (major < 0) {
-		DBG_PRINT ("Registering the character device failed with %d\n", major);
+		INF("Registering the character device failed with %d\n", major);
 		return major;
 	}
-	DBG_PRINT("sendfile_aes: assigned major: %d\n", major);
-	printk(DEVICE_NAME " create a node with mknod /dev/sendfile_aes c %d 0\n", major);
+	INF("sendfile_aes: assigned major: %d\n", major);
+	ERR(DEVICE_NAME " create a node with mknod /dev/sendfile_aes c %d 0\n", major);
 
 	OPENSSL_cpuid_setup();
 
@@ -434,7 +448,7 @@ static int __init sendfile_aes_init(void)
 
 static void __exit sendfile_aes_exit(void)
 {
-	DBG_PRINT(DEVICE_NAME " exit\n");
+	INF(DEVICE_NAME " exit\n");
 	unregister_chrdev(major, DEVICE_NAME);
 }
 

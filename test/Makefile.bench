@@ -5,8 +5,12 @@ BINARIES_NULL_ENC=$(BINARIES:.bin=.bin-null-enc)
 BINARIES_NULL_OPENSSL=$(BINARIES:.bin=.bin-null-openssl)
 CORES=12
 
-all: single_process full_gas full_gas_null
+all: setup single_process full_gas full_gas_null
 	@echo Benchmark done
+
+setup:
+	$(SHELL) ./setup_bench.sh
+	@echo Setup done
 
 single_process:
 	@echo Performance 135MB sendfile_aes:
@@ -41,7 +45,7 @@ $(BINARIES_ENC):
 
 $(BINARIES_OPENSSL):
 	@./test_openssl.sh $(@:.bin-openssl=.bin)
-	
+
 
 
 # tests that pipe the output to /dev/null:
@@ -54,4 +58,4 @@ $(BINARIES_NULL_ENC):
 
 $(BINARIES_NULL_OPENSSL):
 	@./test_openssl_devnull.sh $(@:.bin-null-openssl=.bin)
-	
+

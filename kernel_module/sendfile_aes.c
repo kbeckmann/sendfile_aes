@@ -246,6 +246,8 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this, struct T_SENDFILE_AE
 	size_t *dst_len = &dst_len_value;
 	loff_t in_off = 0;
 	loff_t out_off = 0;
+	char pad[16];
+	size_t padding = (0x10 - (message->count & 0x0f));
 
 	INF(DEVICE_NAME " do_sendfile_aes_encrypt:\n\t"
 		"out_fd: %d\n\t"
@@ -259,33 +261,32 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this, struct T_SENDFILE_AE
 
 	//TODO: handle error on file_in and file_out
 
+	int n2 = 0;
+	int last_n = 0;
 	while ((n = file_read(file_in, &in_off, this->tmp_buf, sizeof(this->tmp_buf)))) {
 		// Encrypt!
-		int n2 = n & (~0xf);
-		int n_trailing = n & 0xf;
-
+		last_n = n;
+		n2 = n & (~0xf);
 		if (likely(n2)) {
 			aes_auto_cbc_encrypt(this->tmp_buf, this->dst_buf, n2, &this->aes_key, this->key->iv_data, this->key->encrypt);
 		}
 
-		if (unlikely(n_trailing)) {
-			size_t zero_padding = 0x10 - (n_trailing);
-			char pad[16];
-			memcpy(pad, this->tmp_buf + n2, n_trailing);
-			memset(pad + n_trailing, zero_padding, zero_padding);
-			aes_auto_cbc_encrypt(pad, this->dst_buf + n2, sizeof(pad), &this->aes_key, this->key->iv_data, this->key->encrypt);
-			INF(DEVICE_NAME " PAD! Wrote %d extra bytes\n", n_trailing);
-			n = n2 + sizeof(pad);
-		}
-
-		*dst_len = n;
-		INF(DEVICE_NAME " n= %ld, n2=%d, n_trailing=%d\n", n, n2, n_trailing);
-		// write to out_fd
-		file_write(file_out, this->dst_buf, n, &out_off);
+		*dst_len += n2;
+		file_write(file_out, this->dst_buf, n2, &out_off);
 	}
-	INF(DEVICE_NAME " (after loop) n= %ld\n", n);
+
+	// Always write trailing padding
+	int n_trailing = last_n & 0xf;
+	INF("Trailing bytes: %d, last_n: %d\n", n_trailing, last_n);
+	memcpy(pad, this->tmp_buf + n2, n_trailing);
+	memset(pad + n_trailing, padding, padding);
+
+	aes_auto_cbc_encrypt(pad, this->dst_buf + n2, sizeof(pad), &this->aes_key, this->key->iv_data, this->key->encrypt);
+	file_write(file_out, this->dst_buf + n2, sizeof(pad), &out_off);
+	*dst_len += sizeof(pad);
+
 	this->message = message->count;
-	INF(DEVICE_NAME " message: %d\n", this->message);
+	INF(DEVICE_NAME " read: %d, wrote: %d\n", this->message, *dst_len);
 
 	// clean up temp buffers so we don't leave plaintext in RAM
 	memset(this->tmp_buf, 0, sizeof(this->tmp_buf));

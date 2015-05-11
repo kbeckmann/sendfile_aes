@@ -3,7 +3,7 @@ BINARIES_ENC=$(BINARIES:.bin=.bin-enc)
 BINARIES_OPENSSL=$(BINARIES:.bin=.bin-openssl)
 BINARIES_NULL_ENC=$(BINARIES:.bin=.bin-null-enc)
 BINARIES_NULL_OPENSSL=$(BINARIES:.bin=.bin-null-openssl)
-CORES=12
+CORES=$(shell grep -c ^processor /proc/cpuinfo)
 
 all: setup single_process full_gas full_gas_null
 	@echo Benchmark done

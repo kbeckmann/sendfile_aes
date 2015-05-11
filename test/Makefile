@@ -1,5 +1,5 @@
 .PHONY: all setup verify bench clean
-CORES=12
+CORES=$(shell grep -c ^processor /proc/cpuinfo)
 
 all: clean verify
 

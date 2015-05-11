@@ -29,7 +29,8 @@ static void die (const char * format, ...)
 static int print_help(int argc, char **argv)
 {
 	(void) argc;
-	printf("Usage: %s <in_file> <out_file> [key [encrypt]]\n"
+	printf("Usage: %s <in_file> <out_file> [key iv [encrypt]]\n"
+		"\tkey and iv should be a hex string, 128 or 256 bit long\n"
 		"\tencrypt: 1=encrypt, 0=decrypt\n"
 		"Note: out_file will not be deleted before it gets over-written.\n",
 		argv[0]);
@@ -59,7 +60,8 @@ static int do_sendfile(char *filename_out, char *filename_in)
 	return 0;
 }
 
-static int do_sendfile_aes(char *filename_out, char *filename_in, int encrypt)
+static int do_sendfile_aes(char *filename_out, char *filename_in,
+                           char *key, int key_length, char *iv, int iv_length, int encrypt)
 {
 	struct stat stat_buf;
 	off_t offset = 0;
@@ -67,11 +69,7 @@ static int do_sendfile_aes(char *filename_out, char *filename_in, int encrypt)
 	int out_fd;
 	int handle;
 
-	// Hard-coded keys for test purpose
-	char key[] = "\x42\x93\x20\x9e\x7a\x46\x38\xbe\x35\xc2\xc2\x91\x53\x3a\x3c\x0b\xe4\x86\x7b\x6b\xd7\x66\x98\x04\x58\xc0\x2b\x3b\x02\x9e\x7d\xf6";
-	char iv[] = "\x09\xca\xa1\x9c\x39\x40\x62\x0b\x6b\x97\xa5\x0a\x7e\x2a\x97\x1d";
-
-	handle = sendfile_aes_open(key, sizeof(key) - 1, iv, sizeof(iv) - 1, encrypt);
+	handle = sendfile_aes_open(key, key_length, iv, iv_length, encrypt);
 	do_delay();
 
 	in_fd = open(filename_in, O_RDONLY);
@@ -91,19 +89,66 @@ static int do_sendfile_aes(char *filename_out, char *filename_in, int encrypt)
 	return 0;
 }
 
+static int hex_to_char(char c)
+{
+	if (c >= '0' && c <= '9') return      c - '0';
+	if (c >= 'A' && c <= 'F') return 10 + c - 'A';
+	if (c >= 'a' && c <= 'f') return 10 + c - 'a';
+	return -1;
+}
+
+static void parse_hex(char *buf, int *size, char *hex)
+{
+	int len = strlen(hex);
+	int i;
+
+	if (len % 2 == 1) {
+		printf("Invalid hex length\n");
+		*size = 0;
+		return;
+	}
+
+	if (len / 2 > *size) {
+		printf("Hex too long\n");
+		*size = 0;
+		return;
+	}
+
+	for (i = 0; i < len / 2; i++, hex += 2) {
+		int c1 = hex_to_char(hex[0]);
+		int c2 = hex_to_char(hex[1]);
+		if (c1 == -1 || c2 == -1) {
+			printf("Invalid character in hex: @%d: %c%c\n", i, hex[0], hex[1]);
+			*size = 0;
+			return;
+		}
+		buf[i] = (c1 << 4) | c2;
+	}
+
+	*size = len / 2;
+}
+
 int main(int argc, char **argv)
 {
 	char *filename_in = argv[1];
 	char *filename_out = argv[2];
+	char key[128];
+	int key_length = sizeof(key);
+	char iv[128];
+	int iv_length = sizeof(iv);
 	int encrypt = 1;
 
 	switch (argc) {
 	case 3:
 		return do_sendfile(filename_out, filename_in);
+	case 6:
+		encrypt = argv[5][0] == '1' ? 1 : 0;
 	case 5:
-		encrypt = argv[4][0] == '1' ? 1 : 0;
-	case 4:
-		return do_sendfile_aes(filename_out, filename_in, encrypt);
+		parse_hex(key, &key_length, argv[3]);
+		parse_hex(iv, &iv_length, argv[4]);
+		if (key_length == 0 || iv_length == 0)
+			return -1;
+		return do_sendfile_aes(filename_out, filename_in, key, key_length, iv, iv_length, encrypt);
 	default:
 		return print_help(argc, argv);
 	}

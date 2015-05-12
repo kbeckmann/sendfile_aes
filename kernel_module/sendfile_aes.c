@@ -288,6 +288,10 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this, struct T_SENDFILE_AE
 	this->message = message->count;
 	INF(DEVICE_NAME " read: %d, wrote: %d\n", this->message, *dst_len);
 
+	// "close" the files
+	fput(file_out);
+	fput(file_in);
+
 	// clean up temp buffers so we don't leave plaintext in RAM
 	memset(this->tmp_buf, 0, sizeof(this->tmp_buf));
 	memset(this->dst_buf, 0, sizeof(this->dst_buf));

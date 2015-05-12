@@ -8,10 +8,10 @@ kernel_module:
 #	$(MAKE) -C kernel_module
 
 userspace_lib:
-	$(MAKE) -C userspace_lib
+	$(MAKE) -s -C userspace_lib
 
 userspace_test:
-	$(MAKE) -C userspace_test
+	$(MAKE) -s -C userspace_test
 
 # Must be root
 install_module:
@@ -24,10 +24,10 @@ install_module:
 # sendfile_aes_package.ko must be loaded and installed in /dev/sendfile_aes
 test:
 	@lsmod | grep sendfile_aes_package &> /dev/null || (echo "Run 'sudo make install_module' first" && false)
-	$(MAKE) -C test
+	$(MAKE) -s -C test
 
 clean:
 	cd kernel_module && $(BASH) ./clean.sh && cd -
-	$(MAKE) -C userspace_lib clean
-	$(MAKE) -C userspace_test clean
-	$(MAKE) -C test clean
+	$(MAKE) -s -C userspace_lib clean
+	$(MAKE) -s -C userspace_test clean
+	$(MAKE) -s -C test clean

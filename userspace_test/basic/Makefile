@@ -11,8 +11,8 @@ EXECUTABLE=basic
 all: check $(EXECUTABLE)
 
 check:
-	@if [ -x "`which cppcheck 2> /dev/null`" ]; then cppcheck --enable=all -I ../../userspace_lib/ $(SOURCES); fi
-	@if [ -x "`which sparse 2> /dev/null`" ]; then sparse -I ../../userspace_lib/ -Wsparse-all $(SOURCES); fi
+	@if [ -x "`which cppcheck 2> /dev/null`" ]; then cppcheck --enable=all -I ../../userspace_lib/ $(SOURCES) || echo "cppcheck failed"; fi
+	@if [ -x "`which sparse 2> /dev/null`" ]; then sparse -I ../../userspace_lib/ -Wsparse-all $(SOURCES) || echo "sparse failed"; fi
 
 $(EXECUTABLE): $(OBJECTS) $(LIBPATHS)
 	$(CC) $(OBJECTS) -o $@ $(LINKFLAGS)

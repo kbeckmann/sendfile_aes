@@ -18,11 +18,11 @@ static void dump(char *prefix, unsigned char *buf, int size)
 int main(int argc, char **argv)
 {
 	char *input[] = {"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-                     "AAAAAAAAAAAAAAAA",
-                     "AAAAAAAAAAAAAAA",
-                     "A",
-                     "",
-					};
+			 "AAAAAAAAAAAAAAAA",
+       			 "AAAAAAAAAAAAAAA",
+			 "A",
+			 "",
+			};
 	unsigned char key[] = "\x42\x93\x20\x9e\x7a\x46\x38\xbe\x35\xc2\xc2\x91\x53\x3a\x3c\x0b\xe4\x86\x7b\x6b\xd7\x66\x98\x04\x58\xc0\x2b\x3b\x02\x9e\x7d\xf6";
 	unsigned char iv_start[] = "\x09\xca\xa1\x9c\x39\x40\x62\x0b\x6b\x97\xa5\x0a\x7e\x2a\x97\x1d";
 	unsigned char iv[sizeof(iv_start)];

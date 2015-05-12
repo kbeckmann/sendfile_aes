@@ -95,9 +95,9 @@ typedef void (*_aes_cbc_encrypt) (const unsigned char *in,
                                 const AES_KEY *key, unsigned char *ivec, int enc);
 
 
-_aes_set_encrypt_key s_aes_set_encrypt_key;
-_aes_set_decrypt_key s_aes_set_decrypt_key;
-_aes_cbc_encrypt s_aes_cbc_encrypt;
+static _aes_set_encrypt_key s_aes_set_encrypt_key;
+static _aes_set_decrypt_key s_aes_set_decrypt_key;
+static _aes_cbc_encrypt s_aes_cbc_encrypt;
 
 
 

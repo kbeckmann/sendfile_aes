@@ -40,7 +40,7 @@
 static int major;
 static int message_err = -1;
 static int message_ok = 0;
-atomic_t num_open_files = ATOMIC_INIT(0);
+static atomic_t num_open_files = ATOMIC_INIT(0);
 
 struct t_data {
 	struct T_SENDFILE_AES_SET_KEY *key;
@@ -104,6 +104,7 @@ static ssize_t message_set_key(struct t_data* this, const char __user *buff, siz
 		return -1;
 	}
 
+	// TODO: Magic value
 	if (len > 4096 + sizeof(set_key)) {
 		ERR(DEVICE_NAME " write(): message too long\n");
 		return -1;
@@ -113,7 +114,7 @@ static ssize_t message_set_key(struct t_data* this, const char __user *buff, siz
 	copy_from_user(this->key, buff, len);
 
 	if (len > this->key->key_length + 31) {
-		ERR(DEVICE_NAME " write(): key_length != len; %d != %ld\n",
+		ERR(DEVICE_NAME " write(): key_length != len; %d != %zu\n",
 			this->key->key_length,
 			len);
 		return -1;
@@ -240,11 +241,13 @@ out:
 
 static ssize_t do_sendfile_aes_encrypt(struct t_data *this, struct T_SENDFILE_AES_SENDFILE *message)
 {
-	ssize_t n;
 	struct file *file_in;
 	struct file *file_out;
-	size_t dst_len_value = 0;
-	size_t *dst_len = &dst_len_value;
+	ssize_t dst_len = 0;
+	ssize_t n;
+	ssize_t n2 = 0;
+	ssize_t last_n = 0;
+	ssize_t n_trailing;
 	loff_t in_off = 0;
 	loff_t out_off = 0;
 	char pad[16];
@@ -253,7 +256,7 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this, struct T_SENDFILE_AE
 	INF(DEVICE_NAME " do_sendfile_aes_encrypt:\n\t"
 		"out_fd: %d\n\t"
 		"in_fd: %d\n\t"
-		"count: %ld\n\t"
+		"count: %zu\n\t"
 		"encrypt: %d\n",
 		message->out_fd, message->in_fd, message->count, this->key->encrypt);
 
@@ -262,8 +265,6 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this, struct T_SENDFILE_AE
 
 	//TODO: handle error on file_in and file_out
 
-	int n2 = 0;
-	int last_n = 0;
 	while ((n = file_read(file_in, &in_off, this->tmp_buf, sizeof(this->tmp_buf)))) {
 		// Encrypt!
 		last_n = n;
@@ -272,22 +273,23 @@ static ssize_t do_sendfile_aes_encrypt(struct t_data *this, struct T_SENDFILE_AE
 			aes_auto_cbc_encrypt(this->tmp_buf, this->dst_buf, n2, &this->aes_key, this->key->iv_data, this->key->encrypt);
 		}
 
-		*dst_len += n2;
+		dst_len += n2;
 		file_write(file_out, this->dst_buf, n2, &out_off);
 	}
 
 	// Always write trailing padding
-	int n_trailing = last_n & 0xf;
-	INF("Trailing bytes: %d, last_n: %d\n", n_trailing, last_n);
+	n_trailing = last_n & 0xf;
+	INF("Trailing bytes: %zd, last_n: %zd\n", n_trailing, last_n);
 	memcpy(pad, this->tmp_buf + n2, n_trailing);
 	memset(pad + n_trailing, padding, padding);
 
 	aes_auto_cbc_encrypt(pad, this->dst_buf + n2, sizeof(pad), &this->aes_key, this->key->iv_data, this->key->encrypt);
 	file_write(file_out, this->dst_buf + n2, sizeof(pad), &out_off);
-	*dst_len += sizeof(pad);
+	dst_len += sizeof(pad);
 
+	// TODO: change to this->message = dst_len; and see what happens
 	this->message = message->count;
-	INF(DEVICE_NAME " read: %d, wrote: %d\n", this->message, *dst_len);
+	INF(DEVICE_NAME " read: %zd, wrote: %zd\n", this->message, dst_len);
 
 	// "close" the files
 	fput(file_out);
@@ -312,7 +314,7 @@ static ssize_t message_sendfile(struct t_data* this, const char __user *buff, si
 	}
 
 	copy_from_user(&message, buff, sizeof(message));
-	INF(DEVICE_NAME " message received (%d, %d, %p, %ld)\n",
+	INF(DEVICE_NAME " message received (%d, %d, %p, %zu)\n",
 		   message.out_fd,
 		   message.in_fd,
 		   message.offset,

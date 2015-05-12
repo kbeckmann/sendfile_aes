@@ -1,4 +1,5 @@
 #include <asm/uaccess.h>
+#include <asm/atomic.h>
 #include <linux/file.h>
 #include <linux/fsnotify.h>
 #include <linux/kernel.h>
@@ -39,7 +40,7 @@
 static int major;
 static int message_err = -1;
 static int message_ok = 0;
-static int num_open_files = 0;
+atomic_t num_open_files = ATOMIC_INIT(0);
 
 struct t_data {
 	struct T_SENDFILE_AES_SET_KEY *key;
@@ -401,8 +402,8 @@ static int device_open(struct inode *inode, struct file *file)
 		data->message = message_ok;
 		file->private_data = data;
 
-		num_open_files++;
-		DBG(DEVICE_NAME " open, open files: %d\n", num_open_files);
+		// Note: This code is only called if DBG is defined
+		DBG(DEVICE_NAME " open, open files: %d\n", atomic_inc_return(&num_open_files));
 	}
 	return 0;
 }
@@ -423,8 +424,9 @@ static int device_release(struct inode *inode, struct file *file)
 			file->private_data = NULL;
 		}
 	}
-	num_open_files--;
-	DBG(DEVICE_NAME " release, open files: %d\n", num_open_files);
+
+	// Note: This code is only called if DBG is defined
+	DBG(DEVICE_NAME " release, open files: %d\n", atomic_dec_return(&num_open_files));
 	return 0;
 }
 

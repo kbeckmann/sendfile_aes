@@ -1,4 +1,6 @@
-BINARIES=$(wildcard rand.*.bin) $(wildcard zero.*.bin) A.bin
+.PHONY: setup
+
+BINARIES=$(wildcard zero.*.bin)
 BINARIES_ENC=$(BINARIES:.bin=.bin-enc)
 BINARIES_OPENSSL=$(BINARIES:.bin=.bin-openssl)
 BINARIES_NULL_ENC=$(BINARIES:.bin=.bin-null-enc)

@@ -15,3 +15,4 @@ bench:
 
 clean:
 	@$(BASH) ./clean.sh
+	@echo Cleaned test

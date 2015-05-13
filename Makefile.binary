@@ -1,0 +1,39 @@
+CC=gcc
+REAL_PWD=$(shell echo $$PWD)
+EXECUTABLE=$(lastword $(subst /, , $(REAL_PWD)))
+ASM=$(wildcard *.s)
+SOURCES=$(wildcard *.c)
+OBJECTS=$(SOURCES:.c=.o)
+
+INCLUDES += $(ROOT)/userspace_lib
+INCLUDE_FLAGS = $(addprefix -I, $(INCLUDES))
+CFLAGS += -g -Wall -Wextra -std=c99 $(INCLUDE_FLAGS)
+
+LINKFLAGS += -lsendfile_aes -L$(ROOT)/userspace_lib
+LIBPATHS += $(ROOT)/userspace_lib/libsendfile_aes.a
+
+SPARSE_FLAGS = $(INCLUDE_FLAGS) -I/usr/include/linux/ -Wsparse-all $(SOURCES)
+
+
+all: $(EXECUTABLE)
+	@echo Built $(EXECUTABLE)
+
+check:
+	if [ -x "`which cppcheck 2> /dev/null`" ]; then cppcheck --enable=all $(INCLUDE_FLAGS) $(SOURCES) || echo "cppcheck failed"; fi
+	if [ -x "`which sparse 2> /dev/null`" ]; then sparse $(SPARSE_FLAGS) || echo "sparse failed"; fi
+
+$(EXECUTABLE): $(OBJECTS) $(LIBPATHS)
+	$(CC) $(OBJECTS) $(ASM) -o $@ $(LINKFLAGS)
+
+clean:
+	rm -f $(EXECUTABLE) $(OBJECTS)
+	@echo Cleaned $(EXECUTABLE)
+
+depend: .depend
+
+.depend: $(SOURCES)
+	rm -f ./.depend
+	$(CC) $(CFLAGS) -MM $^ > ./.depend;
+
+include .depend
+

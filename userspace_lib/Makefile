@@ -4,7 +4,7 @@ SOURCES=$(wildcard *.c)
 OBJECTS=$(SOURCES:.c=.o)
 LIBRARY=libsendfile_aes
 
-all: check $(LIBRARY)
+all: $(LIBRARY)
 
 check:
 	@if [ -x "`which cppcheck 2> /dev/null`" ]; then cppcheck --enable=all -I ../include/ $(SOURCES) || echo "cppcheck failed"; fi
@@ -12,12 +12,11 @@ check:
 
 $(LIBRARY): $(OBJECTS) $(HEADERS)
 	$(AR) $(ARFLAGS) $@.a $(OBJECTS)
-
-.o:
-	$(CC) $(CFLAGS) $< -o $@
+	@echo Built userspace_lib
 
 clean:
 	rm -f $(LIBRARY).a $(OBJECTS)
+	@echo Cleaned userspace_lib
 
 depend: .depend
 

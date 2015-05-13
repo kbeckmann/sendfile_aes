@@ -1,16 +1,15 @@
 EXTRA_CFLAGS=-I$(PWD)/../include
 KERNEL_INCLUDE_PATH = /lib/modules/$(shell uname -r)/build/arch/$(ARCH)/include
-ASSEMBLY = \
+
+obj-m += sendfile_aes_package.o
+
+sendfile_aes_package-objs += \
+	aes.o \
+	sendfile_aes.o \
 	aes-x86_64.o \
 	aesni-x86_64.o \
 	vpaes-x86_64.o \
 	x86_64cpuid.o
-
-obj-m += sendfile_aes_package.o
-
-sendfile_aes_package-objs += $(ASSEMBLY) \
-	aes.o \
-	sendfile_aes.o
 
 all: modules
 
@@ -21,10 +20,9 @@ check:
 	make C=2 modules
 
 modules:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+	@make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+	@echo Built kernel_module
 
 clean:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
-
-$(addprefix $(PWD)/, $(ASSEMBLY)):
-	$(CC) -c $(@:.o=.s) -o $@
+	@echo Cleaned kernel_module

@@ -20,5 +20,6 @@ void aes_auto_cbc_encrypt(const unsigned char *in,
                        unsigned char *out,
                        size_t length,
                        const AES_KEY *key, unsigned char *ivec, int enc);
+void aes_auto_teardown(AES_KEY *key);
 
 void OPENSSL_cpuid_setup(void);

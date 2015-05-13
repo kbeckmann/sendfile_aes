@@ -8,8 +8,6 @@
 #include "sendfile_aes.h"
 #include "aes.h"
 
-//#define _DEBUG_
-
 #define DBG_PRINT(...) printk(__VA_ARGS__)
 
 #define LOGLEVEL 1
@@ -40,7 +38,10 @@
 static int major;
 static int message_err = -1;
 static int message_ok = 0;
+
+#if LOGLEVEL >= 1
 static atomic_t num_open_files = ATOMIC_INIT(0);
+#endif
 
 struct t_data {
 	struct T_SENDFILE_AES_SET_KEY *key;

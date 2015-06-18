@@ -1,4 +1,6 @@
 language: c
 
 script:
-  - (make)
+  - (make userspace_lib)
+  - (cd userspace_test && make)
+  
